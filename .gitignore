@@ -1,0 +1,4 @@
+.kube/
+*.agekey
+*.age.key
+age.agekey
