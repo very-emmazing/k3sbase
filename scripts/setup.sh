@@ -82,6 +82,7 @@ if [[ "${CLUSTER}" == "pi" ]]; then
   }
 
   if _nodes_ok; then
+    # _nodes_ok runs in a subshell; source again here to export vars into this shell.
     # shellcheck source=/dev/null
     source "${NODES_ENV}"
     ok "Bereits konfiguriert: server=${PI_SERVER}  agents=${PI_AGENT_0} ${PI_AGENT_1} ${PI_AGENT_2}"
