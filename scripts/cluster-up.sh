@@ -45,12 +45,16 @@ fi
 # ── Pi (k3s via SSH) ──────────────────────────────────────────────────────────
 if [[ "${CLUSTER}" == "pi" ]]; then
   NODES_ENV="${REPO_ROOT}/clusters/pi/nodes.env"
+  VERSIONS_ENV="${REPO_ROOT}/clusters/pi/versions.env"
   CILIUM_MANIFEST="${REPO_ROOT}/clusters/pi/infrastructure/cilium.yaml"
   PI_KUBECONFIG="${REPO_ROOT}/.kube/pi-config"
 
-  [[ -f "${NODES_ENV}" ]] || { echo "Fehler: ${NODES_ENV} fehlt – zuerst: mise run setup -- pi"; exit 1; }
+  [[ -f "${NODES_ENV}" ]]    || { echo "Fehler: ${NODES_ENV} fehlt – zuerst: mise run setup -- pi"; exit 1; }
+  [[ -f "${VERSIONS_ENV}" ]] || { echo "Fehler: ${VERSIONS_ENV} fehlt – zuerst: mise run setup -- pi"; exit 1; }
   # shellcheck source=/dev/null
   source "${NODES_ENV}"
+  # shellcheck source=/dev/null
+  source "${VERSIONS_ENV}"
 
   for var in PI_USER PI_SERVER PI_AGENT_0 PI_AGENT_1 PI_AGENT_2; do
     [[ -z "${!var:-}" ]] && { echo "Fehler: ${var} ist leer in ${NODES_ENV}"; exit 1; }
@@ -92,7 +96,7 @@ if [[ "${CLUSTER}" == "pi" ]]; then
     echo "  k3s bereits installiert – übersprungen"
   else
     ssh_do "${PI_SERVER}" "
-      curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION=v1.36.2+k3s1 sh -s - server \
+      curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION="${K3S_VERSION}" sh -s - server \
         --disable traefik \
         --disable servicelb \
         --disable local-storage \
@@ -121,7 +125,7 @@ if [[ "${CLUSTER}" == "pi" ]]; then
     else
       ssh_do "${agent}" "
         curl -sfL https://get.k3s.io | \
-          INSTALL_K3S_VERSION=v1.36.2+k3s1 \
+          INSTALL_K3S_VERSION="${K3S_VERSION}" \
           K3S_URL=https://${PI_SERVER}:6443 \
           K3S_TOKEN=${K3S_TOKEN} \
           sh -

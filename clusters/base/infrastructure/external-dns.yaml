@@ -25,7 +25,7 @@ spec:
   chart:
     spec:
       chart: external-dns
-      version: "1.15.0"
+      version: "${EXTERNAL_DNS_VERSION}"
       sourceRef:
         kind: HelmRepository
         name: external-dns

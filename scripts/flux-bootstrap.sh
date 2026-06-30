@@ -13,6 +13,11 @@ case "${CLUSTER}" in
   *) printf "Unbekannter Cluster '%s'. Erlaubt: local | pi\n" "${CLUSTER}" >&2; exit 1 ;;
 esac
 
+VERSIONS_ENV="${REPO_ROOT}/clusters/${CLUSTER}/versions.env"
+[[ -f "${VERSIONS_ENV}" ]] || { echo "Fehler: ${VERSIONS_ENV} fehlt – zuerst: mise run setup -- ${CLUSTER}"; exit 1; }
+# shellcheck source=/dev/null
+source "${VERSIONS_ENV}"
+
 if [[ "${CLUSTER}" == "local" ]]; then
   export KUBECONFIG="${REPO_ROOT}/.kube/config"
   [[ -f "${KUBECONFIG}" ]] || { echo "Fehler: ${KUBECONFIG} fehlt – zuerst: mise run cluster-up -- local"; exit 1; }
@@ -39,7 +44,7 @@ if helm status flux-operator -n flux-system &>/dev/null 2>&1; then
 else
   helm upgrade --install flux-operator \
     oci://ghcr.io/controlplaneio-fluxcd/charts/flux-operator \
-    --version 0.52.0 \
+    --version "${FLUX_OPERATOR_VERSION}" \
     --namespace flux-system \
     --create-namespace \
     --wait
