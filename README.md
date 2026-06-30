@@ -61,7 +61,53 @@ Alle weiteren Änderungen per Commit → Flux synct automatisch.
 Der Private Key liegt unter `~/.config/sops/age/keys.txt` und gehört **niemals ins Repo**.  
 Auf neuen Maschinen `mise run age-init` ausführen und dann den Public Key in `.sops.yaml` eintragen.
 
+## Lokale Validierung mit flux-local
+
+`flux-local` validiert Kustomizations und HelmReleases **rein lokal gegen den Git-Stand** – kein laufender Cluster nötig.
+
+```bash
+mise install   # installiert auch kustomize und flux-local (pipx)
+```
+
+| Task | Was er tut |
+|---|---|
+| `mise run flux-build` | Rendert alle Kustomizations und zählt die Ressourcen – schlägt fehl, wenn etwas nicht rendert |
+| `mise run flux-diff-ks` | Zeigt den Diff einer einzelnen Kustomization gegen `main` (dyff-Format) |
+| `mise run flux-diff-hr` | Zeigt den Diff einer einzelnen HelmRelease gegen `main` (Helm-template-inflated, dyff-Format) |
+| `mise run flux-test` | Volle Test-Suite inkl. Helm-Template-Validierung für alle Cluster |
+| `mise run flux-check` | Führt `flux-build` + `flux-test` aus – als Pre-Push-Check |
+
+Der Default-Cluster-Pfad ist überall `clusters/local`; einen anderen Pfad als zusätzliches Argument übergeben.
+
+**Beispiele:**
+
+```bash
+# Prüfen ob alle Kustomizations in clusters/local sauber rendern
+mise run flux-build
+
+# Dasselbe für den Pi-Cluster
+mise run flux-build -- clusters/pi
+
+# Diff der Kustomization "infrastructure" gegen main
+mise run flux-diff-ks -- infrastructure
+
+# Diff der HelmRelease "cilium" im Namespace "kube-system"
+mise run flux-diff-hr -- cilium kube-system
+
+# Volle Test-Suite (alle Cluster)
+mise run flux-test
+
+# Alles auf einmal (entspricht dem Pre-Push-Hook)
+mise run flux-check
+```
+
+Der Pre-Push-Hook (`mise run flux-check`) wird über pre-commit aktiviert:
+
+```bash
+pre-commit install --hook-type pre-push
+```
+
 ## Cluster-Targets
 
-Aktuell: `local`. Weitere Targets (Hetzner, Turing Pi) werden als eigene Verzeichnisse unter
+Aktuell: `local` und `pi`. Weitere Targets werden als eigene Verzeichnisse unter
 `clusters/` angelegt; die `infrastructure/`-Manifeste sollen target-übergreifend wiederverwendet werden.

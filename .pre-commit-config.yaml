@@ -1,0 +1,9 @@
+repos:
+  - repo: local
+    hooks:
+      - id: flux-local-check
+        name: flux-local pre-push validation
+        entry: mise run flux-check
+        language: system
+        pass_filenames: false
+        stages: [pre-push]
