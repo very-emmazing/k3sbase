@@ -1,0 +1,155 @@
+#!/usr/bin/env bash
+# cluster-up.sh – Cluster erstellen und Kubeconfig schreiben
+# Verwendung: mise run cluster-up -- <local|pi>
+set -euo pipefail
+
+CLUSTER="${1:?Fehler: Cluster angeben – z.B.: mise run cluster-up -- local}"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+case "${CLUSTER}" in
+  local|pi) ;;
+  *) printf "Unbekannter Cluster '%s'. Erlaubt: local | pi\n" "${CLUSTER}" >&2; exit 1 ;;
+esac
+
+# ── Local (k3d) ───────────────────────────────────────────────────────────────
+if [[ "${CLUSTER}" == "local" ]]; then
+  if k3d cluster list 2>/dev/null | awk 'NR>1 {print $1}' | grep -qx "${CLUSTER}"; then
+    echo "k3d cluster '${CLUSTER}' already exists, skipping"
+  else
+    # --flannel-backend=none   : Cilium liefert das Datplane
+    # --disable-kube-proxy     : Cilium ersetzt kube-proxy vollständig (eBPF)
+    # --disable-network-policy : Cilium übernimmt NetworkPolicies
+    # --no-lb                  : kein k3d-LoadBalancer-Container für lokale Dev
+    k3d cluster create "${CLUSTER}" \
+      --k3s-arg '--disable=traefik@server:*' \
+      --k3s-arg '--disable=servicelb@server:*' \
+      --k3s-arg '--disable=local-storage@server:*' \
+      --k3s-arg '--flannel-backend=none@server:*' \
+      --k3s-arg '--disable-network-policy@server:*' \
+      --k3s-arg '--disable-kube-proxy@server:*' \
+      --no-lb \
+      --wait
+    echo "k3d cluster '${CLUSTER}' erstellt"
+  fi
+
+  mkdir -p "${REPO_ROOT}/.kube"
+  k3d kubeconfig get "${CLUSTER}" > "${REPO_ROOT}/.kube/config"
+  chmod 600 "${REPO_ROOT}/.kube/config"
+  echo "Kubeconfig: ${REPO_ROOT}/.kube/config"
+
+  printf "\nWeiter mit:\n"
+  printf "  mise run cilium-up     -- %s\n" "${CLUSTER}"
+  printf "  mise run flux-bootstrap -- %s\n" "${CLUSTER}"
+fi
+
+# ── Pi (k3s via SSH) ──────────────────────────────────────────────────────────
+if [[ "${CLUSTER}" == "pi" ]]; then
+  NODES_ENV="${REPO_ROOT}/clusters/pi/nodes.env"
+  CILIUM_MANIFEST="${REPO_ROOT}/clusters/pi/infrastructure/cilium.yaml"
+  PI_KUBECONFIG="${REPO_ROOT}/.kube/pi-config"
+
+  [[ -f "${NODES_ENV}" ]] || { echo "Fehler: ${NODES_ENV} fehlt – zuerst: mise run setup -- pi"; exit 1; }
+  # shellcheck source=/dev/null
+  source "${NODES_ENV}"
+
+  for var in PI_USER PI_SERVER PI_AGENT_0 PI_AGENT_1 PI_AGENT_2; do
+    [[ -z "${!var:-}" ]] && { echo "Fehler: ${var} ist leer in ${NODES_ENV}"; exit 1; }
+  done
+
+  ALL_NODES=("${PI_SERVER}" "${PI_AGENT_0}" "${PI_AGENT_1}" "${PI_AGENT_2}")
+  AGENTS=("${PI_AGENT_0}" "${PI_AGENT_1}" "${PI_AGENT_2}")
+
+  ssh_do() {
+    local node="$1"; shift
+    ssh -o StrictHostKeyChecking=accept-new -o ConnectTimeout=10 \
+        -o BatchMode=yes "${PI_USER}@${node}" "$@"
+  }
+
+  echo "Nodes: server=${PI_SERVER}  agents=${PI_AGENT_0} ${PI_AGENT_1} ${PI_AGENT_2}"
+  echo
+
+  # ── [1/4] Chrony (NTP) ──────────────────────────────────────────────────────
+  echo "=== [1/4] Chrony auf allen Nodes ==="
+  # Chrony ist essenziell: stark abweichende Uhren führen zu TLS-Fehlern zwischen Nodes.
+  for node in "${ALL_NODES[@]}"; do
+    printf "  %-18s " "${node}"
+    if ssh_do "${node}" "chronyc tracking &>/dev/null"; then
+      echo "bereits aktiv"
+    else
+      ssh_do "${node}" "
+        sudo apt-get update -qq -o=Dpkg::Use-Pty=0 &&
+        sudo apt-get install -y -q chrony &&
+        sudo systemctl enable --now chrony
+      " >/dev/null
+      echo "installiert"
+    fi
+  done
+
+  # ── [2/4] k3s Server ────────────────────────────────────────────────────────
+  echo
+  echo "=== [2/4] k3s Server (${PI_SERVER}) ==="
+  if ssh_do "${PI_SERVER}" "command -v k3s &>/dev/null"; then
+    echo "  k3s bereits installiert – übersprungen"
+  else
+    ssh_do "${PI_SERVER}" "
+      curl -sfL https://get.k3s.io | sh -s - server \
+        --disable traefik \
+        --disable servicelb \
+        --disable local-storage \
+        --flannel-backend=none \
+        --disable-network-policy \
+        --disable-kube-proxy \
+        --tls-san ${PI_SERVER}
+    "
+    echo "  Warte auf Ready …"
+    ssh_do "${PI_SERVER}" \
+      "sudo k3s kubectl wait node --for=condition=Ready --all --timeout=120s" \
+      >/dev/null
+    echo "  Bereit"
+  fi
+
+  K3S_TOKEN="$(ssh_do "${PI_SERVER}" "sudo cat /var/lib/rancher/k3s/server/node-token")"
+
+  # ── [3/4] k3s Agents ────────────────────────────────────────────────────────
+  echo
+  echo "=== [3/4] k3s Agents ==="
+  for agent in "${AGENTS[@]}"; do
+    printf "  %-18s " "${agent}"
+    if ssh_do "${agent}" "command -v k3s &>/dev/null"; then
+      echo "bereits installiert"
+    else
+      ssh_do "${agent}" "
+        curl -sfL https://get.k3s.io | \
+          K3S_URL=https://${PI_SERVER}:6443 \
+          K3S_TOKEN=${K3S_TOKEN} \
+          sh -
+      " >/dev/null
+      echo "installiert"
+    fi
+  done
+
+  # ── [4/4] Kubeconfig exportieren ────────────────────────────────────────────
+  echo
+  echo "=== [4/4] Kubeconfig ==="
+  mkdir -p "${REPO_ROOT}/.kube"
+  ssh_do "${PI_SERVER}" "sudo cat /etc/rancher/k3s/k3s.yaml" \
+    | sed "s|https://127.0.0.1:6443|https://${PI_SERVER}:6443|" \
+    > "${PI_KUBECONFIG}"
+  chmod 600 "${PI_KUBECONFIG}"
+  echo "  Geschrieben: ${PI_KUBECONFIG}"
+
+  # ── Cilium HelmRelease patchen ───────────────────────────────────────────────
+  if grep -q 'REPLACE_WITH_PI_SERVER_IP' "${CILIUM_MANIFEST}"; then
+    sed -i "s|REPLACE_WITH_PI_SERVER_IP|${PI_SERVER}|g" "${CILIUM_MANIFEST}"
+    echo
+    echo "  cilium.yaml aktualisiert (k8sServiceHost: ${PI_SERVER})"
+    echo "  Bitte vor cilium-up committen:"
+    echo "    git add clusters/pi/infrastructure/cilium.yaml"
+    echo "    git commit -m 'chore(pi): set cilium api server host'"
+  fi
+
+  printf "\nWeiter mit:\n"
+  printf "  git add clusters/pi/infrastructure/cilium.yaml && git commit -m 'chore(pi): set cilium api server host'\n"
+  printf "  mise run cilium-up      -- %s\n" "${CLUSTER}"
+  printf "  mise run flux-bootstrap  -- %s\n" "${CLUSTER}"
+fi

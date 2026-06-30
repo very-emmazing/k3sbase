@@ -15,31 +15,14 @@ KUBECONFIG = "{{config_root}}/.kube/config"
 description = "Interaktiver Setup-Assistent: age-Key, SOPS-Recipient, Secrets abfragen und verschlüsseln"
 run         = "bash scripts/setup.sh"
 
-[tasks.k3d-up]
-description = "Create k3d cluster without CNI (flannel replaced by Cilium)"
-run         = "bash scripts/bootstrap-k3d.sh"
-
-[tasks.age-init]
-description = "Generate age key and configure SOPS recipient in .sops.yaml"
-run         = "bash scripts/bootstrap-age.sh"
+[tasks.cluster-up]
+description = "Cluster erstellen (local → k3d, pi → k3s via SSH) und Kubeconfig schreiben"
+run         = "bash scripts/cluster-up.sh"
 
 [tasks.cilium-up]
-description = "Install Cilium CNI imperatively (must run before Flux)"
-run         = "bash scripts/bootstrap-cilium.sh"
+description = "Cilium imperativ installieren (muss vor flux-bootstrap laufen)"
+run         = "bash scripts/cilium-up.sh"
 
 [tasks.flux-bootstrap]
-description = "Install Flux Operator, apply FluxInstance, create sops-age secret"
-run         = "bash scripts/bootstrap-flux-operator.sh"
-
-# ── Pi-Cluster ────────────────────────────────────────────────────────────────
-[tasks.pi-up]
-description = "Chrony + k3s (1 server, 3 agents) auf Pi-Nodes via SSH installieren"
-run         = "bash scripts/bootstrap-pi-k3s.sh"
-
-[tasks.pi-cilium-up]
-description = "Cilium imperativ auf dem Pi-Cluster installieren (vor pi-flux-bootstrap)"
-run         = "KUBECONFIG='{{config_root}}/.kube/pi-config' bash scripts/bootstrap-pi-cilium.sh"
-
-[tasks.pi-flux-bootstrap]
-description = "Flux Operator + FluxInstance + sops-age Secret auf dem Pi-Cluster"
-run         = "KUBECONFIG='{{config_root}}/.kube/pi-config' bash scripts/bootstrap-pi-flux.sh"
+description = "Flux Operator + FluxInstance + SOPS-age-Secret installieren"
+run         = "bash scripts/flux-bootstrap.sh"

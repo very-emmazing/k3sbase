@@ -1,25 +1,39 @@
 #!/usr/bin/env bash
-# bootstrap-pi-flux.sh – Flux Operator auf dem Pi-Cluster bootstrappen
-# Voraussetzung: Cilium läuft (mise run pi-cilium-up), cilium.yaml committed.
-# Ausführen via: mise run pi-flux-bootstrap
+# flux-bootstrap.sh – Flux Operator + FluxInstance + SOPS-age-Secret
+# Voraussetzung: Cilium läuft (mise run cilium-up -- <cluster>)
+# Verwendung: mise run flux-bootstrap -- <local|pi>
 set -euo pipefail
 
+CLUSTER="${1:?Fehler: Cluster angeben – z.B.: mise run flux-bootstrap -- local}"
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-export KUBECONFIG="${REPO_ROOT}/.kube/pi-config"
-CLUSTER="pi"
 AGE_KEY_FILE="${HOME}/.config/sops/age/keys.txt"
 
-[[ -f "${KUBECONFIG}" ]] || { echo "Fehler: ${KUBECONFIG} fehlt – zuerst: mise run pi-up"; exit 1; }
-[[ -f "${AGE_KEY_FILE}" ]] || { echo "Fehler: age-Key fehlt – zuerst: mise run setup"; exit 1; }
+case "${CLUSTER}" in
+  local|pi) ;;
+  *) printf "Unbekannter Cluster '%s'. Erlaubt: local | pi\n" "${CLUSTER}" >&2; exit 1 ;;
+esac
 
-# Prüfen ob k8sServiceHost noch Platzhalter enthält
-if grep -q 'REPLACE_WITH_PI_SERVER_IP' "${REPO_ROOT}/clusters/pi/infrastructure/cilium.yaml"; then
-  echo "Fehler: k8sServiceHost in clusters/pi/infrastructure/cilium.yaml noch nicht gesetzt."
-  echo "  mise run pi-up ausführen und cilium.yaml danach committen."
-  exit 1
+if [[ "${CLUSTER}" == "local" ]]; then
+  export KUBECONFIG="${REPO_ROOT}/.kube/config"
+  [[ -f "${KUBECONFIG}" ]] || { echo "Fehler: ${KUBECONFIG} fehlt – zuerst: mise run cluster-up -- local"; exit 1; }
 fi
 
+if [[ "${CLUSTER}" == "pi" ]]; then
+  export KUBECONFIG="${REPO_ROOT}/.kube/pi-config"
+  [[ -f "${KUBECONFIG}" ]] || { echo "Fehler: ${KUBECONFIG} fehlt – zuerst: mise run cluster-up -- pi"; exit 1; }
+
+  # Sicherstellen dass cilium.yaml nicht mehr den Platzhalter enthält
+  if grep -q 'REPLACE_WITH_PI_SERVER_IP' "${REPO_ROOT}/clusters/pi/infrastructure/cilium.yaml"; then
+    echo "Fehler: k8sServiceHost in clusters/pi/infrastructure/cilium.yaml noch nicht gesetzt."
+    echo "  mise run cluster-up -- pi ausführen und cilium.yaml danach committen."
+    exit 1
+  fi
+fi
+
+[[ -f "${AGE_KEY_FILE}" ]] || { echo "Fehler: age-Key fehlt – zuerst: mise run setup -- ${CLUSTER}"; exit 1; }
+
 # ── Flux Operator ──────────────────────────────────────────────────────────────
+# Imperativ einmalig installiert; danach selbst-verwaltet über die FluxInstance.
 if helm status flux-operator -n flux-system &>/dev/null 2>&1; then
   echo "Flux Operator bereits installiert – übersprungen"
 else

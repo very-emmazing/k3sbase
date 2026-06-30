@@ -62,26 +62,29 @@ scripts/               # idempotente Bootstrap-Skripte
 
 ## Bootstrap-Reihenfolge
 
-### Erstmalig (beide Cluster)
+Alle Tasks erwarten `-- <local|pi>` als Argument.
+
+### Erstmalig (pro Cluster)
 
 ```
-mise run setup   # age-Key, .sops.yaml, Pi-IPs, Cloudflare-Token – einmal für alle
+mise run setup -- local   # age-Key, .sops.yaml, Cloudflare-Token
+mise run setup -- pi      # wie local + Pi-Node-IPs abfragen
 ```
 
 ### Lokaler Entwicklungs-Cluster (k3d)
 
 Zwingend, wegen Henne-Ei-Abhängigkeiten:
 
-1. `mise run k3d-up` — k3d-Cluster ohne CNI (`--flannel-backend=none`, kube-proxy/traefik/servicelb/local-storage deaktiviert)
-2. `mise run cilium-up` — Cilium imperativ (kein Pod ohne CNI, auch nicht Flux selbst)
-3. `mise run flux-bootstrap` — Flux Operator + FluxInstance + age-Secret; ab hier übernimmt Flux
+1. `mise run cluster-up   -- local` — k3d-Cluster ohne CNI (`--flannel-backend=none`, kube-proxy/traefik/servicelb/local-storage deaktiviert)
+2. `mise run cilium-up    -- local` — Cilium imperativ (kein Pod ohne CNI, auch nicht Flux selbst)
+3. `mise run flux-bootstrap -- local` — Flux Operator + FluxInstance + age-Secret; ab hier übernimmt Flux
 
 ### Pi-Cluster (1 Server + 3 Agents)
 
-1. `mise run pi-up` — Chrony (NTP) + k3s auf allen Nodes via SSH; Kubeconfig → `.kube/pi-config`; patcht `k8sServiceHost` in `clusters/pi/infrastructure/cilium.yaml`
+1. `mise run cluster-up   -- pi` — Chrony (NTP) + k3s auf allen Nodes via SSH; Kubeconfig → `.kube/pi-config`; patcht `k8sServiceHost` in `clusters/pi/infrastructure/cilium.yaml`
 2. `git commit` — cilium.yaml mit Server-IP committen (Schritt 1 gibt Hinweis)
-3. `mise run pi-cilium-up` — Cilium imperativ auf Pi-Cluster
-4. `mise run pi-flux-bootstrap` — Flux auf Pi-Cluster; ab hier übernimmt Flux
+3. `mise run cilium-up    -- pi` — Cilium imperativ auf Pi-Cluster
+4. `mise run flux-bootstrap -- pi` — Flux auf Pi-Cluster; ab hier übernimmt Flux
 
 Cilium wird nach dem Bootstrap per Helm-Release-Adoption von Flux übernommen (HelmRelease im Repo mit gleichem Name/Namespace wie der CLI-Install).
 

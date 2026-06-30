@@ -15,25 +15,26 @@ Benötigt: Docker (für k3d) und einen Linux-Host mit Kernel ≥ 5.10 (für Cili
 ### Einmalig (Secrets + Konfiguration)
 
 ```bash
-mise run setup   # age-Key, SOPS, Pi-Node-IPs, Cloudflare-Token – einmal für alle Cluster
+mise run setup -- local   # age-Key, SOPS, Cloudflare-Token für lokalen Cluster
+mise run setup -- pi      # + Pi-Node-IPs zusätzlich abfragen
 ```
 
 ### Lokaler Entwicklungs-Cluster (k3d)
 
 ```bash
-mise run k3d-up          # k3d-Cluster ohne CNI erstellen
-mise run cilium-up       # Cilium imperativ installieren (kein Pod läuft ohne CNI)
-mise run flux-bootstrap  # Flux Operator + FluxInstance + sops-age Secret
+mise run cluster-up   -- local   # k3d-Cluster ohne CNI erstellen
+mise run cilium-up    -- local   # Cilium imperativ installieren (kein Pod läuft ohne CNI)
+mise run flux-bootstrap -- local # Flux Operator + FluxInstance + sops-age Secret
 ```
 
 ### Pi-Cluster (1 Server + 3 Agents)
 
 ```bash
-mise run pi-up           # Chrony + k3s via SSH; patcht clusters/pi/infrastructure/cilium.yaml
+mise run cluster-up  -- pi   # Chrony + k3s via SSH; patcht clusters/pi/infrastructure/cilium.yaml
 git add clusters/pi/infrastructure/cilium.yaml
 git commit -m "chore(pi): set cilium api server host"
-mise run pi-cilium-up    # Cilium imperativ auf Pi-Cluster
-mise run pi-flux-bootstrap
+mise run cilium-up    -- pi
+mise run flux-bootstrap -- pi
 ```
 
 Ab `flux-bootstrap` / `pi-flux-bootstrap` übernimmt Flux die Reconciliation.  
