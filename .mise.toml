@@ -30,3 +30,16 @@ run         = "bash scripts/bootstrap-cilium.sh"
 [tasks.flux-bootstrap]
 description = "Install Flux Operator, apply FluxInstance, create sops-age secret"
 run         = "bash scripts/bootstrap-flux-operator.sh"
+
+# ── Pi-Cluster ────────────────────────────────────────────────────────────────
+[tasks.pi-up]
+description = "Chrony + k3s (1 server, 3 agents) auf Pi-Nodes via SSH installieren"
+run         = "bash scripts/bootstrap-pi-k3s.sh"
+
+[tasks.pi-cilium-up]
+description = "Cilium imperativ auf dem Pi-Cluster installieren (vor pi-flux-bootstrap)"
+run         = "KUBECONFIG='{{config_root}}/.kube/pi-config' bash scripts/bootstrap-pi-cilium.sh"
+
+[tasks.pi-flux-bootstrap]
+description = "Flux Operator + FluxInstance + sops-age Secret auf dem Pi-Cluster"
+run         = "KUBECONFIG='{{config_root}}/.kube/pi-config' bash scripts/bootstrap-pi-flux.sh"
