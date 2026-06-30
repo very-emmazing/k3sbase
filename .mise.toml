@@ -43,6 +43,13 @@ run         = 'DIFF="dyff between --omit-header --color on" flux-local diff ks "
 description = "Diff einer HelmRelease gegen main via helm template + dyff (Arg 1: name, Arg 2: namespace, Arg 3: cluster-Pfad)"
 run         = 'DIFF="dyff between --omit-header --color on" flux-local diff hr "$1" -n "$2" --path "${3:-clusters/local}"'
 
+[tasks.flux-diff-hr-sub]
+description = "Wie flux-diff-hr, aber rendert zuerst die Kustomization (postBuild-Substitutionen aktiv) – nutzen wenn HR-Werte via Kustomization-Variablen gesetzt werden (Arg 1: name, Arg 2: namespace, Arg 3: cluster-Pfad)"
+run = [
+  'flux-local build ks --path "${3:-clusters/local}"',
+  'DIFF="dyff between --omit-header --color on" flux-local diff hr "$1" -n "$2" --path "${3:-clusters/local}"',
+]
+
 [tasks.flux-test]
 description = "Volle Test-Suite inkl. Helm-Template-Validierung"
 run         = "flux-local test --enable-helm -v"

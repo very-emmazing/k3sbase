@@ -74,6 +74,7 @@ mise install   # installiert auch kustomize und flux-local (pipx)
 | `mise run flux-build` | Rendert alle Kustomizations und zählt die Ressourcen – schlägt fehl, wenn etwas nicht rendert |
 | `mise run flux-diff-ks` | Zeigt den Diff einer einzelnen Kustomization gegen `main` (dyff-Format) |
 | `mise run flux-diff-hr` | Zeigt den Diff einer einzelnen HelmRelease gegen `main` (Helm-template-inflated, dyff-Format) |
+| `mise run flux-diff-hr-sub` | Wie `flux-diff-hr`, baut aber zuerst explizit die Kustomization, damit `postBuild`-Substitutionsvariablen im HelmRelease sichtbar sind |
 | `mise run flux-test` | Volle Test-Suite inkl. Helm-Template-Validierung für alle Cluster |
 | `mise run flux-check` | Führt `flux-build` + `flux-test` aus – als Pre-Push-Check |
 
@@ -93,6 +94,9 @@ mise run flux-diff-ks -- infrastructure
 
 # Diff der HelmRelease "cilium" im Namespace "kube-system"
 mise run flux-diff-hr -- cilium kube-system
+
+# Dasselbe, aber zuerst Kustomization rendern (wenn cilium-Werte via postBuild-Variablen gesetzt werden)
+mise run flux-diff-hr-sub -- cilium kube-system
 
 # Volle Test-Suite (alle Cluster)
 mise run flux-test
