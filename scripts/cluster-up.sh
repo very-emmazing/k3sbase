@@ -45,12 +45,16 @@ fi
 # ── Pi (k3s via SSH) ──────────────────────────────────────────────────────────
 if [[ "${CLUSTER}" == "pi" ]]; then
   NODES_ENV="${REPO_ROOT}/clusters/pi/nodes.env"
+  VERSIONS_ENV="${REPO_ROOT}/clusters/pi/versions.env"
   CILIUM_MANIFEST="${REPO_ROOT}/clusters/pi/infrastructure/cilium.yaml"
   PI_KUBECONFIG="${REPO_ROOT}/.kube/pi-config"
 
-  [[ -f "${NODES_ENV}" ]] || { echo "Fehler: ${NODES_ENV} fehlt – zuerst: mise run setup -- pi"; exit 1; }
+  [[ -f "${NODES_ENV}" ]]    || { echo "Fehler: ${NODES_ENV} fehlt – zuerst: mise run setup -- pi"; exit 1; }
+  [[ -f "${VERSIONS_ENV}" ]] || { echo "Fehler: ${VERSIONS_ENV} fehlt – zuerst: mise run setup -- pi"; exit 1; }
   # shellcheck source=/dev/null
   source "${NODES_ENV}"
+  # shellcheck source=/dev/null
+  source "${VERSIONS_ENV}"
 
   for var in PI_USER PI_SERVER PI_AGENT_0 PI_AGENT_1 PI_AGENT_2; do
     [[ -z "${!var:-}" ]] && { echo "Fehler: ${var} ist leer in ${NODES_ENV}"; exit 1; }
@@ -92,7 +96,7 @@ if [[ "${CLUSTER}" == "pi" ]]; then
     echo "  k3s bereits installiert – übersprungen"
   else
     ssh_do "${PI_SERVER}" "
-      curl -sfL https://get.k3s.io | sh -s - server \
+      curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION="${K3S_VERSION}" sh -s - server \
         --disable traefik \
         --disable servicelb \
         --disable local-storage \
@@ -101,7 +105,7 @@ if [[ "${CLUSTER}" == "pi" ]]; then
         --disable-kube-proxy \
         --tls-san ${PI_SERVER}
     "
-    echo "  Warte auf Ready …"
+    echo "  Warte auf Server-Node …"
     ssh_do "${PI_SERVER}" \
       "sudo k3s kubectl wait node --for=condition=Ready --all --timeout=120s" \
       >/dev/null
@@ -113,6 +117,7 @@ if [[ "${CLUSTER}" == "pi" ]]; then
   # ── [3/4] k3s Agents ────────────────────────────────────────────────────────
   echo
   echo "=== [3/4] k3s Agents ==="
+  AGENTS_INSTALLED=false
   for agent in "${AGENTS[@]}"; do
     printf "  %-18s " "${agent}"
     if ssh_do "${agent}" "command -v k3s &>/dev/null"; then
@@ -120,13 +125,23 @@ if [[ "${CLUSTER}" == "pi" ]]; then
     else
       ssh_do "${agent}" "
         curl -sfL https://get.k3s.io | \
+          INSTALL_K3S_VERSION="${K3S_VERSION}" \
           K3S_URL=https://${PI_SERVER}:6443 \
           K3S_TOKEN=${K3S_TOKEN} \
           sh -
       " >/dev/null
       echo "installiert"
+      AGENTS_INSTALLED=true
     fi
   done
+
+  if [[ "${AGENTS_INSTALLED}" == true ]]; then
+    echo "  Warte bis alle Nodes Ready …"
+    ssh_do "${PI_SERVER}" \
+      "sudo k3s kubectl wait node --for=condition=Ready --all --timeout=180s" \
+      >/dev/null
+    echo "  Alle Nodes bereit"
+  fi
 
   # ── [4/4] Kubeconfig exportieren ────────────────────────────────────────────
   echo

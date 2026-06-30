@@ -49,7 +49,7 @@ Alle weiteren Änderungen per Commit → Flux synct automatisch.
    # in clusters/local/infrastructure/external-dns-secret.yaml den Wert von 'token' setzen
    ```
 
-2. Datei mit SOPS verschlüsseln (nach `mise run age-init`):
+2. Datei mit SOPS verschlüsseln (nach `mise run setup`):
    ```bash
    sops -e -i clusters/local/infrastructure/external-dns-secret.yaml
    ```
@@ -59,7 +59,7 @@ Alle weiteren Änderungen per Commit → Flux synct automatisch.
 ### age-Private-Key
 
 Der Private Key liegt unter `~/.config/sops/age/keys.txt` und gehört **niemals ins Repo**.  
-Auf neuen Maschinen `mise run age-init` ausführen und dann den Public Key in `.sops.yaml` eintragen.
+Auf neuen Maschinen `mise run setup` ausführen und dann den Public Key in `.sops.yaml` eintragen.
 
 ## Lokale Validierung mit flux-local
 

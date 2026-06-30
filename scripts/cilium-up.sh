@@ -18,7 +18,7 @@ if [[ "${CLUSTER}" == "local" ]]; then
   export KUBECONFIG="${REPO_ROOT}/.kube/config"
   [[ -f "${KUBECONFIG}" ]] || { echo "Fehler: ${KUBECONFIG} fehlt – zuerst: mise run cluster-up -- local"; exit 1; }
 
-  if cilium status &>/dev/null 2>&1; then
+  if cilium status &>/dev/null; then
     echo "Cilium bereits installiert – übersprungen"
   else
     cilium install \
@@ -39,7 +39,7 @@ if [[ "${CLUSTER}" == "pi" ]]; then
   source "${REPO_ROOT}/clusters/pi/nodes.env"
   [[ -z "${PI_SERVER:-}" ]] && { echo "Fehler: PI_SERVER nicht gesetzt in clusters/pi/nodes.env"; exit 1; }
 
-  if cilium status &>/dev/null 2>&1; then
+  if cilium status &>/dev/null; then
     echo "Cilium bereits installiert – übersprungen"
   else
     cilium install \

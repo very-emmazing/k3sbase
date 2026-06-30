@@ -3,3 +3,10 @@ kind: Kustomization
 resources:
   - flux-system/
   - infrastructure-sync.yaml
+configMapGenerator:
+  - name: cluster-versions
+    namespace: flux-system
+    envs:
+      - versions.env
+    options:
+      disableNameSuffixHash: true
