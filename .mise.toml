@@ -11,6 +11,10 @@ cilium-cli = "latest"
 [env]
 KUBECONFIG = "{{config_root}}/.kube/config"
 
+[tasks.setup]
+description = "Interaktiver Setup-Assistent: age-Key, SOPS-Recipient, Secrets abfragen und verschlüsseln"
+run         = "bash scripts/setup.sh"
+
 [tasks.k3d-up]
 description = "Create k3d cluster without CNI (flannel replaced by Cilium)"
 run         = "bash scripts/bootstrap-k3d.sh"
