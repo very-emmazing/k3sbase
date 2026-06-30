@@ -1,19 +1,19 @@
 # k3sbase
 
-GitOps-verwalteter k3s-Cluster mit Flux Operator, Cilium, cert-manager und external-dns/Cloudflare.
+GitOps-verwalteter k3d-Cluster mit Flux Operator, Cilium, cert-manager und external-dns/Cloudflare.
 
 ## Voraussetzungen
 
 ```
-mise install   # installiert kubectl, helm, flux2, age, sops, cilium-cli
+mise install   # installiert kubectl, helm, flux2, age, sops, k3d, cilium-cli
 ```
 
-Benötigt: echter k3s-Host (lokal, VM oder Hetzner) – kein k3d/kind.
+Benötigt: Docker (für k3d) und einen Linux-Host mit Kernel ≥ 5.10 (für Cilium eBPF/kube-proxy-replacement).
 
 ## Bootstrap-Reihenfolge
 
 ```bash
-mise run k3s-up          # k3s ohne CNI installieren
+mise run k3d-up          # k3d-Cluster ohne CNI erstellen
 mise run age-init        # age-Key generieren, .sops.yaml befüllen
 mise run cilium-up       # Cilium imperativ installieren (kein Pod läuft ohne CNI)
 mise run flux-bootstrap  # Flux Operator + FluxInstance + sops-age Secret

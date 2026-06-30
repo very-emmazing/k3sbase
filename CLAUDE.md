@@ -64,7 +64,7 @@ scripts/               # idempotente Bootstrap-Skripte
 
 Zwingend, wegen Henne-Ei-Abhängigkeiten:
 
-1. `mise run k3s-up` — k3s ohne CNI (`--flannel-backend=none`, kube-proxy/traefik/servicelb/local-storage deaktiviert)
+1. `mise run k3d-up` — k3d-Cluster ohne CNI (`--flannel-backend=none`, kube-proxy/traefik/servicelb/local-storage deaktiviert)
 2. `mise run age-init` — age-Key generieren, `.sops.yaml` füllen
 3. `mise run cilium-up` — Cilium imperativ (kein Pod ohne CNI, auch nicht Flux selbst)
 4. `mise run flux-bootstrap` — Flux Operator + FluxInstance + age-Secret; ab hier übernimmt Flux

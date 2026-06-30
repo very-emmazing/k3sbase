@@ -4,15 +4,16 @@ helm       = "latest"
 flux2      = "latest"
 age        = "latest"
 sops       = "latest"
+k3d        = "latest"
 # cilium-cli: if not found, use: mise use "aqua:cilium/cilium-cli"
 cilium-cli = "latest"
 
 [env]
 KUBECONFIG = "{{config_root}}/.kube/config"
 
-[tasks.k3s-up]
-description = "Install k3s without CNI (flannel replaced by Cilium)"
-run         = "bash scripts/bootstrap-k3s.sh"
+[tasks.k3d-up]
+description = "Create k3d cluster without CNI (flannel replaced by Cilium)"
+run         = "bash scripts/bootstrap-k3d.sh"
 
 [tasks.age-init]
 description = "Generate age key and configure SOPS recipient in .sops.yaml"
