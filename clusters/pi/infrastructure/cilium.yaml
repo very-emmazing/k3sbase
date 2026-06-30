@@ -1,0 +1,34 @@
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata:
+  name: cilium
+  namespace: flux-system
+spec:
+  interval: 24h
+  url: https://helm.cilium.io/
+---
+# Release name and namespace match the cilium-cli install so Flux can adopt it.
+# k8sServiceHost is set to the Pi server node IP by bootstrap-pi-k3s.sh;
+# verify it matches PI_SERVER in clusters/pi/nodes.env before running pi-flux-bootstrap.
+# operator.replicas: 2 for HA across the multi-node cluster.
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: cilium
+  namespace: kube-system
+spec:
+  interval: 30m
+  chart:
+    spec:
+      chart: cilium
+      version: "1.16.5"
+      sourceRef:
+        kind: HelmRepository
+        name: cilium
+        namespace: flux-system
+  values:
+    kubeProxyReplacement: true
+    k8sServiceHost: "REPLACE_WITH_PI_SERVER_IP"
+    k8sServicePort: "6443"
+    operator:
+      replicas: 2
