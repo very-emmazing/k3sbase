@@ -33,6 +33,15 @@ case "${CLUSTER}" in
   *) printf "Unbekannter Cluster '%s'. Erlaubt: local | pi\n" "${CLUSTER}" >&2; exit 1 ;;
 esac
 
+# Gleiche Chart-Version wie die HelmRelease pinnen – sonst installiert die
+# cilium-cli ihre Default-Version und Flux downgraded den laufenden CNI
+# bei der Adoption.
+VERSIONS_ENV="${REPO_ROOT}/clusters/${CLUSTER}/versions.env"
+[[ -f "${VERSIONS_ENV}" ]] || { echo "Fehler: ${VERSIONS_ENV} fehlt – zuerst: mise run setup -- ${CLUSTER}"; exit 1; }
+# shellcheck source=/dev/null
+source "${VERSIONS_ENV}"
+[[ -n "${CILIUM_VERSION:-}" ]] || { echo "Fehler: CILIUM_VERSION fehlt in ${VERSIONS_ENV}"; exit 1; }
+
 if [[ "${CLUSTER}" == "local" ]]; then
   export KUBECONFIG="${REPO_ROOT}/.kube/config"
   [[ -f "${KUBECONFIG}" ]] || { echo "Fehler: ${KUBECONFIG} fehlt – zuerst: mise run cluster-up -- local"; exit 1; }
@@ -52,6 +61,7 @@ if [[ "${CLUSTER}" == "local" ]]; then
     echo "Cilium bereits installiert – übersprungen"
   else
     cilium install \
+      --version "${CILIUM_VERSION}" \
       --set kubeProxyReplacement=true \
       --set k8sServiceHost="${SERVER_IP}" \
       --set k8sServicePort=6443 \
@@ -76,6 +86,7 @@ if [[ "${CLUSTER}" == "pi" ]]; then
     echo "Cilium bereits installiert – übersprungen"
   else
     cilium install \
+      --version "${CILIUM_VERSION}" \
       --set kubeProxyReplacement=true \
       --set k8sServiceHost="${PI_SERVER}" \
       --set k8sServicePort=6443 \
