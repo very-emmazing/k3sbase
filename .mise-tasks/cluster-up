@@ -122,11 +122,19 @@ if [[ "${CLUSTER}" == "pi" ]]; then
         --disable-kube-proxy \
         --tls-san ${PI_SERVER}
     "
-    echo "  Warte auf Server-Node …"
-    ssh_do "${PI_SERVER}" \
-      "sudo k3s kubectl wait node --for=condition=Ready --all --timeout=120s" \
-      >/dev/null
-    echo "  Bereit"
+    # Kein Ready-Wait: ohne CNI (flannel-backend=none) bleiben Nodes NotReady
+    # bis cilium-up gelaufen ist – Ready-Warten wäre ein garantierter Timeout.
+    # Stattdessen nur warten bis der API-Server antwortet und der Node registriert ist.
+    echo "  Warte bis API-Server erreichbar und Node registriert …"
+    ssh_do "${PI_SERVER}" "
+      for _ in \$(seq 1 60); do
+        sudo k3s kubectl get nodes --no-headers 2>/dev/null | grep -q . && exit 0
+        sleep 2
+      done
+      echo 'Timeout: k3s API nicht erreichbar oder Node nicht registriert' >&2
+      exit 1
+    " >/dev/null
+    echo "  Registriert"
   fi
 
   K3S_TOKEN="$(ssh_do "${PI_SERVER}" "sudo cat /var/lib/rancher/k3s/server/node-token")"
@@ -153,11 +161,17 @@ if [[ "${CLUSTER}" == "pi" ]]; then
   done
 
   if [[ "${AGENTS_INSTALLED}" == true ]]; then
-    echo "  Warte bis alle Nodes Ready …"
-    ssh_do "${PI_SERVER}" \
-      "sudo k3s kubectl wait node --for=condition=Ready --all --timeout=180s" \
-      >/dev/null
-    echo "  Alle Nodes bereit"
+    # Wie beim Server: Ready kommt erst mit dem CNI, hier nur Registrierung prüfen.
+    echo "  Warte bis alle ${#ALL_NODES[@]} Nodes registriert sind …"
+    ssh_do "${PI_SERVER}" "
+      for _ in \$(seq 1 90); do
+        [ \"\$(sudo k3s kubectl get nodes --no-headers 2>/dev/null | wc -l)\" -ge ${#ALL_NODES[@]} ] && exit 0
+        sleep 2
+      done
+      echo 'Timeout: nicht alle Nodes registriert' >&2
+      exit 1
+    " >/dev/null
+    echo "  Alle Nodes registriert"
   fi
 
   # ── [4/4] Kubeconfig exportieren ────────────────────────────────────────────
