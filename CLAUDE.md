@@ -1,18 +1,18 @@
 # CLAUDE.md
 
-Leitfaden für die Arbeit an diesem Repository.
+Leitfaden für Arbeit an Repo.
 
 ## Projektkontext
 
-GitOps-verwalteter k3s-Cluster, gesteuert über Flux (Flux Operator). Mehrere Cluster-Targets geplant (lokal, Hetzner, Turing Pi); Module sollen target-übergreifend wiederverwendbar bleiben, target-spezifische Abweichungen nur in der Bootstrap-/Cluster-Schicht.
+GitOps-verwalteter k3s-Cluster via Flux (Flux Operator). Mehrere Cluster-Targets geplant (lokal, Hetzner, Turing Pi); Module target-übergreifend wiederverwendbar, target-spezifische Abweichungen nur in Bootstrap-/Cluster-Schicht.
 
 **Tooling:** mise (Versionsmanagement + Tasks), SOPS+age (Secrets), Cilium (CNI), cert-manager + external-dns/Cloudflare (TLS/DNS).
 
 ## Grundprinzipien
 
-- **Alles im Repo, nichts nur in der Shell.** Jeder Schritt ist ein idempotentes Skript oder Manifest, aufrufbar über einen mise-Task. Ein frischer Checkout plus mise-Tasks in Reihenfolge muss einen identischen Cluster ergeben.
-- **GitOps zuerst.** Nach dem Flux-Bootstrap wird nichts mehr manuell per `helm install`/`kubectl apply` installiert – alles läuft über Flux-Reconciliation aus dem Repo. Einzige Ausnahmen: die zwangsläufig imperativen Bootstrap-Schritte (CNI vor Flux, Flux selbst), klar als solche kommentiert.
-- **Minimaler Overhead.** Keine Komponente aufnehmen, die kein konkretes Problem löst.
+- **Alles im Repo, nichts nur in Shell.** Jeder Schritt = idempotentes Skript oder Manifest, aufrufbar via mise-Task. Frischer Checkout + mise-Tasks in Reihenfolge muss identischen Cluster ergeben.
+- **GitOps zuerst.** Nach Flux-Bootstrap nichts manuell per `helm install`/`kubectl apply` — alles via Flux-Reconciliation aus Repo. Einzige Ausnahmen: zwangsläufig imperative Bootstrap-Schritte (CNI vor Flux, Flux selbst), klar kommentiert.
+- **Minimaler Overhead.** Keine Komponente ohne konkretes Problem.
 
 ## Commit-Konvention: Conventional Commits
 
@@ -28,10 +28,10 @@ Schema:
 **Types:** `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `build`, `ci`, `chore`
 
 **Regeln:**
-- Description in Kleinschreibung, Imperativ, ohne Punkt am Ende
+- Description klein, Imperativ, kein Punkt am Ende
 - Scope = betroffene Komponente (z. B. `cilium`, `flux`, `mise`, `sops`, `cert-manager`, `external-dns`)
 - Breaking Changes: `!` nach Type/Scope **oder** Footer `BREAKING CHANGE: <beschreibung>`
-- Ein Commit pro logischem Schritt, nicht mehrere Themen vermischen
+- Ein Commit pro logischem Schritt, keine Themen mischen
 
 **Beispiele:**
 ```
@@ -44,9 +44,9 @@ refactor(flux)!: move infrastructure into dependsOn chain
 
 ## Secrets
 
-- **age-Private-Key gehört NIEMALS ins Repo.** Liegt lokal unter `~/.config/sops/age/keys.txt`.
-- Alle Secrets im Repo sind SOPS-verschlüsselt (age-Recipient in `.sops.yaml`).
-- Platzhalter-Secrets (z. B. Cloudflare-Token) werden verschlüsselt committed, der reale Wert lokal via `sops -e -i <datei>` eingetragen.
+- **age-Private-Key NIEMALS ins Repo.** Lokal unter `~/.config/sops/age/keys.txt`.
+- Alle Secrets im Repo SOPS-verschlüsselt (age-Recipient in `.sops.yaml`).
+- Platzhalter-Secrets (z. B. Cloudflare-Token) verschlüsselt committen, realer Wert lokal via `sops -e -i <datei>`.
 - `.gitignore` muss `.kube/` und age-Key-Pfade abdecken.
 
 ## Repo-Struktur
@@ -73,7 +73,7 @@ mise run setup -- pi      # wie local + Pi-Node-IPs abfragen
 
 ### Lokaler Entwicklungs-Cluster (k3d)
 
-Zwingend, wegen Henne-Ei-Abhängigkeiten:
+Reihenfolge zwingend (Henne-Ei-Abhängigkeiten):
 
 1. `mise run cluster-up   -- local` — k3d-Cluster ohne CNI (`--flannel-backend=none`, kube-proxy/traefik/servicelb/local-storage deaktiviert)
 2. `mise run cilium-up    -- local` — Cilium imperativ (kein Pod ohne CNI, auch nicht Flux selbst)
@@ -82,16 +82,16 @@ Zwingend, wegen Henne-Ei-Abhängigkeiten:
 ### Pi-Cluster (1 Server + 3 Agents)
 
 1. `mise run cluster-up   -- pi` — Chrony (NTP) + k3s auf allen Nodes via SSH; Kubeconfig → `.kube/pi-config`; patcht `k8sServiceHost` in `clusters/pi/infrastructure/cilium.yaml`
-2. `git commit` + `git push` — cilium.yaml mit Server-IP committen und pushen (Flux reconciliert `origin/main`; `flux-bootstrap` prüft das)
+2. `git commit` + `git push` — cilium.yaml mit Server-IP committen + pushen (Flux reconciliert `origin/main`; `flux-bootstrap` prüft das)
 3. `mise run cilium-up    -- pi` — Cilium imperativ auf Pi-Cluster
 4. `mise run flux-bootstrap -- pi` — Flux auf Pi-Cluster; ab hier übernimmt Flux
 
-Cilium wird nach dem Bootstrap per Helm-Release-Adoption von Flux übernommen (HelmRelease im Repo mit gleichem Name/Namespace wie der CLI-Install).
+Cilium nach Bootstrap per Helm-Release-Adoption von Flux übernommen (HelmRelease im Repo, gleicher Name/Namespace wie CLI-Install).
 
 ## Konventionen für Manifeste
 
 - HelmReleases mit gepinnten Chart-Versionen, keine `latest`-Floating-Tags
-- `dependsOn` nutzen, wo Reihenfolge nötig ist (Cilium ready vor cert-manager/external-dns)
+- `dependsOn` wo Reihenfolge nötig (Cilium ready vor cert-manager/external-dns)
 - Namespaces explizit deklarieren
 - Vor Commit lokal validieren (`kubeconform`/`kube-score`/`flux diff`, soweit anwendbar)
 
