@@ -62,6 +62,9 @@ else
 # Never commit the age private key (${AGE_KEY_FILE}).
 creation_rules:
   - path_regex: clusters/.*\.yaml$
+    # Nur data/stringData verschlüsseln: kind/apiVersion/metadata müssen für
+    # kustomize build lesbar bleiben, sonst schlägt jeder Build fehl.
+    encrypted_regex: ^(data|stringData)$
     age: ${AGE_PUB}
 SOPS
   ok ".sops.yaml aktualisiert"

@@ -1,4 +1,7 @@
 # Never commit the age private key (/Users/emma/.config/sops/age/keys.txt).
 creation_rules:
   - path_regex: clusters/.*\.yaml$
+    # Nur data/stringData verschlüsseln: kind/apiVersion/metadata müssen für
+    # kustomize build lesbar bleiben, sonst schlägt jeder Build fehl.
+    encrypted_regex: ^(data|stringData)$
     age: age100029hv4crfdtd2yu8fxvfajjfstjg83x8v6dn5v7preg4j8uq7svyvt6n
