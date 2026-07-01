@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+#MISE description="Diff einer Kustomization gegen main, via dyff (Arg 1: name, Arg 2: cluster-Pfad)"
+set -euo pipefail
+DIFF="dyff between --omit-header --color on" flux-local diff ks "$1" --path "${2:-clusters/local}"

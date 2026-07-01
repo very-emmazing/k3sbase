@@ -55,8 +55,8 @@ refactor(flux)!: move infrastructure into dependsOn chain
 clusters/<cluster-name>/
   flux-system/         # FluxInstance + Bootstrap-Referenz
   infrastructure/      # HelmReleases (cilium, cert-manager, external-dns, ...)
-scripts/               # idempotente Bootstrap-Skripte
-.mise.toml             # Tools + Tasks
+.mise-tasks/           # idempotente Bootstrap-Skripte als mise-Tasks
+.mise.toml             # Tools + Env
 .sops.yaml             # age-Recipients
 ```
 

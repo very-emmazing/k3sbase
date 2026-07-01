@@ -14,47 +14,4 @@ cilium-cli        = "0.19.5"
 # Defaults to the local k3d cluster; override for pi: KUBECONFIG=.kube/pi-config kubectl ...
 KUBECONFIG = "{{config_root}}/.kube/config"
 
-[tasks.setup]
-description = "Interaktiver Setup-Assistent: age-Key, SOPS-Recipient, Secrets abfragen und verschlüsseln"
-run         = "bash scripts/setup.sh"
-
-[tasks.cluster-up]
-description = "Cluster erstellen (local → k3d, pi → k3s via SSH) und Kubeconfig schreiben"
-run         = "bash scripts/cluster-up.sh"
-
-[tasks.cilium-up]
-description = "Cilium imperativ installieren (muss vor flux-bootstrap laufen)"
-run         = "bash scripts/cilium-up.sh"
-
-[tasks.flux-bootstrap]
-description = "Flux Operator + FluxInstance + SOPS-age-Secret installieren"
-run         = "bash scripts/flux-bootstrap.sh"
-
-# ── flux-local: lokale Validierung (kein Live-Cluster nötig) ─────────────────
-
-[tasks.flux-build]
-description = "Lokal builden, prüft ob alle Kustomizations sauber rendern"
-run         = 'flux-local build ks --path "${1:-clusters/local}" | kustomize cfg count'
-
-[tasks.flux-diff-ks]
-description = "Diff einer Kustomization gegen main, via dyff (Arg 1: name, Arg 2: cluster-Pfad)"
-run         = 'DIFF="dyff between --omit-header --color on" flux-local diff ks "$1" --path "${2:-clusters/local}"'
-
-[tasks.flux-diff-hr]
-description = "Diff einer HelmRelease gegen main via helm template + dyff (Arg 1: name, Arg 2: namespace, Arg 3: cluster-Pfad)"
-run         = 'DIFF="dyff between --omit-header --color on" flux-local diff hr "$1" -n "$2" --path "${3:-clusters/local}"'
-
-[tasks.flux-diff-hr-sub]
-description = "Wie flux-diff-hr, aber rendert zuerst die Kustomization (postBuild-Substitutionen aktiv) – nutzen wenn HR-Werte via Kustomization-Variablen gesetzt werden (Arg 1: name, Arg 2: namespace, Arg 3: cluster-Pfad)"
-run = [
-  'flux-local build ks --path "${3:-clusters/local}"',
-  'DIFF="dyff between --omit-header --color on" flux-local diff hr "$1" -n "$2" --path "${3:-clusters/local}"',
-]
-
-[tasks.flux-test]
-description = "Volle Test-Suite inkl. Helm-Template-Validierung"
-run         = "flux-local test --enable-helm -v"
-
-[tasks.flux-check]
-description = "Kompletter Pre-Push-Check: build + test (Standard-Cluster: clusters/local)"
-depends     = ["flux-build", "flux-test"]
+# Tasks liegen als ausführbare Skripte in .mise-tasks/ (Metadaten via #MISE-Header im Skript)

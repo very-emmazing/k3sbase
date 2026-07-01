@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-# cluster-up.sh – Cluster erstellen und Kubeconfig schreiben
-# Verwendung: mise run cluster-up -- <local|pi>
+#MISE description="Cluster erstellen (local → k3d, pi → k3s via SSH) und Kubeconfig schreiben"
 set -euo pipefail
 
 CLUSTER="${1:?Fehler: Cluster angeben – z.B.: mise run cluster-up -- local}"

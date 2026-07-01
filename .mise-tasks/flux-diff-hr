@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+#MISE description="Diff einer HelmRelease gegen main via helm template + dyff (Arg 1: name, Arg 2: namespace, Arg 3: cluster-Pfad)"
+set -euo pipefail
+DIFF="dyff between --omit-header --color on" flux-local diff hr "$1" -n "$2" --path "${3:-clusters/local}"

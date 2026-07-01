@@ -1,9 +1,8 @@
 #!/usr/bin/env bash
-# cilium-up.sh – Cilium imperativ installieren (vor flux-bootstrap)
+#MISE description="Cilium imperativ installieren (muss vor flux-bootstrap laufen)"
 # Ohne CNI bleiben alle Pods Pending – auch Flux selbst.
 # Nach dem Bootstrap übernimmt Flux die HelmRelease per Adoption
 # (gleicher Release-Name "cilium" im Namespace "kube-system").
-# Verwendung: mise run cilium-up -- <local|pi>
 set -euo pipefail
 
 CLUSTER="${1:?Fehler: Cluster angeben – z.B.: mise run cilium-up -- local}"

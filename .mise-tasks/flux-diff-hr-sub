@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+#MISE description="Wie flux-diff-hr, aber rendert zuerst die Kustomization (postBuild-Substitutionen aktiv) – nutzen wenn HR-Werte via Kustomization-Variablen gesetzt werden (Arg 1: name, Arg 2: namespace, Arg 3: cluster-Pfad)"
+set -euo pipefail
+flux-local build ks --path "${3:-clusters/local}"
+DIFF="dyff between --omit-header --color on" flux-local diff hr "$1" -n "$2" --path "${3:-clusters/local}"

@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+#MISE description="Kompletter Pre-Push-Check: build + test (Standard-Cluster: clusters/local)"
+#MISE depends=["flux-build", "flux-test"]
+set -euo pipefail
+echo "flux-check: build + test ok"

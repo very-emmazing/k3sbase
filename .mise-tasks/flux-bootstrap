@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
-# flux-bootstrap.sh – Flux Operator + FluxInstance + SOPS-age-Secret
+#MISE description="Flux Operator + FluxInstance + SOPS-age-Secret installieren"
 # Voraussetzung: Cilium läuft (mise run cilium-up -- <cluster>)
-# Verwendung: mise run flux-bootstrap -- <local|pi>
 set -euo pipefail
 
 CLUSTER="${1:?Fehler: Cluster angeben – z.B.: mise run flux-bootstrap -- local}"

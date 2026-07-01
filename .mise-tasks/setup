@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-# setup.sh – interaktiver Setup-Assistent für einen Cluster
-# Verwendung: mise run setup -- <local|pi>
+#MISE description="Interaktiver Setup-Assistent: age-Key, SOPS-Recipient, Secrets abfragen und verschlüsseln"
 set -euo pipefail
 
 CLUSTER="${1:?Fehler: Cluster angeben – z.B.: mise run setup -- local}"

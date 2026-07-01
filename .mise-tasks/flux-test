@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+#MISE description="Volle Test-Suite inkl. Helm-Template-Validierung"
+set -euo pipefail
+flux-local test --enable-helm -v

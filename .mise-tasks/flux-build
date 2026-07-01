@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+#MISE description="Lokal builden, prüft ob alle Kustomizations sauber rendern"
+set -euo pipefail
+flux-local build ks --path "${1:-clusters/local}" | kustomize cfg count
