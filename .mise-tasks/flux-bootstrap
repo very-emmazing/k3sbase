@@ -25,20 +25,35 @@ fi
 if [[ "${CLUSTER}" == "pi" ]]; then
   export KUBECONFIG="${REPO_ROOT}/.kube/pi-config"
   [[ -f "${KUBECONFIG}" ]] || { echo "Fehler: ${KUBECONFIG} fehlt – zuerst: mise run cluster-up -- pi"; exit 1; }
+fi
 
-  # Sicherstellen dass cilium.yaml nicht mehr den Platzhalter enthält
-  if grep -q 'REPLACE_WITH_PI_SERVER_IP' "${REPO_ROOT}/clusters/pi/infrastructure/cilium.yaml"; then
-    echo "Fehler: k8sServiceHost in clusters/pi/infrastructure/cilium.yaml noch nicht gesetzt."
-    echo "  mise run cluster-up -- pi ausführen und cilium.yaml danach committen."
+# ── cilium.yaml muss gesetzt UND auf origin/main sein ─────────────────────────
+# Flux reconciliert origin/main, nicht den lokalen Checkout: ein nur lokal
+# committeter (oder gar uncommitteter) k8sServiceHost käme im Cluster nie an.
+CILIUM_REL="clusters/${CLUSTER}/infrastructure/cilium.yaml"
+if grep -q 'REPLACE_WITH_' "${REPO_ROOT}/${CILIUM_REL}"; then
+  echo "Fehler: k8sServiceHost in ${CILIUM_REL} noch nicht gesetzt."
+  echo "  mise run cluster-up -- ${CLUSTER} ausführen, dann committen und pushen."
+  exit 1
+fi
+if git -C "${REPO_ROOT}" rev-parse --verify -q origin/main >/dev/null; then
+  git -C "${REPO_ROOT}" fetch -q origin main 2>/dev/null \
+    || echo "Warnung: git fetch fehlgeschlagen – prüfe gegen letzten bekannten Stand von origin/main"
+  if ! git -C "${REPO_ROOT}" diff --quiet origin/main -- "${CILIUM_REL}"; then
+    echo "Fehler: ${CILIUM_REL} weicht von origin/main ab."
+    echo "  Flux reconciliert origin/main – Änderung committen und pushen:"
+    echo "    git add ${CILIUM_REL} && git commit -m 'chore(${CLUSTER}): set cilium api server host' && git push"
     exit 1
   fi
+else
+  echo "Warnung: kein origin/main gefunden – Push-Check übersprungen"
 fi
 
 [[ -f "${AGE_KEY_FILE}" ]] || { echo "Fehler: age-Key fehlt – zuerst: mise run setup -- ${CLUSTER}"; exit 1; }
 
 # ── Flux Operator ──────────────────────────────────────────────────────────────
 # Imperativ einmalig installiert; danach selbst-verwaltet über die FluxInstance.
-if helm status flux-operator -n flux-system &>/dev/null 2>&1; then
+if helm status flux-operator -n flux-system &>/dev/null; then
   echo "Flux Operator bereits installiert – übersprungen"
 else
   helm upgrade --install flux-operator \
