@@ -1,5 +1,10 @@
 #!/usr/bin/env bash
-#MISE description="Kompletter Pre-Push-Check: build + test (Standard-Cluster: clusters/local)"
-#MISE depends=["flux-build", "flux-test"]
+#MISE description="Kompletter Pre-Push-Check: build + test (alle Cluster)"
+# Bewusst sequenziell statt "#MISE depends": mise führt depends parallel aus,
+# und zwei gleichzeitige flux-local-Läufe im selben Arbeitsbaum kollidieren
+# (flux-local fasst kustomization.yaml-Dateien temporär an und hinterlässt
+# bei Abbruch .original-Backups).
 set -euo pipefail
+mise run flux-build
+mise run flux-test
 echo "flux-check: build + test ok"
