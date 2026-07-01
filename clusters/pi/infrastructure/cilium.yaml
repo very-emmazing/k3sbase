@@ -30,5 +30,12 @@ spec:
     kubeProxyReplacement: true
     k8sServiceHost: "REPLACE_WITH_PI_SERVER_IP"
     k8sServicePort: "6443"
+    # Ohne dies mountet Cilium eine eigene, isolierte cgroupv2-Instanz statt
+    # die vorhandene unter /sys/fs/cgroup zu nutzen – Socket-LB (ClusterIP-
+    # Routing für reguläre Pods wie coredns/metrics-server) greift dann nie.
+    cgroup:
+      autoMount:
+        enabled: false
+      hostRoot: /sys/fs/cgroup
     operator:
       replicas: 2

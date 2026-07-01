@@ -31,7 +31,23 @@ spec:
         namespace: flux-system
   values:
     kubeProxyReplacement: true
-    k8sServiceHost: "REPLACE_WITH_LOCAL_SERVER_IP"
+    k8sServiceHost: "172.18.0.3"
     k8sServicePort: "6443"
+    # Ohne dies mountet Cilium eine eigene, isolierte cgroupv2-Instanz statt
+    # die vorhandene unter /sys/fs/cgroup zu nutzen.
+    cgroup:
+      autoMount:
+        enabled: false
+      hostRoot: /sys/fs/cgroup
+    # In k3d hängen sich Ciliums Socket-LB-eBPF-Hooks wegen der verschachtelten
+    # cgroup-Namespaces des k3d-Node-Containers nicht zuverlässig ein, obwohl
+    # "cilium status" Socket LB als "Full coverage" meldet (verifiziert per
+    # "bpftool cgroup tree"). ClusterIPs werden dann als "non-routable"
+    # markiert und sind aus normalen Pods (coredns, metrics-server, ...)
+    # nicht erreichbar ("connection refused"). hostNamespaceOnly beschränkt
+    # Socket-LB auf den Host-Netzwerk-Namespace; reguläre Pod-Verbindungen
+    # laufen dann über den tc/xdp-NAT-Pfad, der davon nicht betroffen ist.
+    socketLB:
+      hostNamespaceOnly: true
     operator:
       replicas: 1
