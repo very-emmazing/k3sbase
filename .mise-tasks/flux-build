@@ -1,4 +1,16 @@
 #!/usr/bin/env bash
-#MISE description="Lokal builden, prüft ob alle Kustomizations sauber rendern"
+#MISE description="Lokal builden, prüft ob alle Kustomizations sauber rendern (ohne Argument: alle Cluster)"
 set -euo pipefail
-flux-local build ks --path "${1:-clusters/local}" | kustomize cfg count
+
+# Ohne Argument alle Cluster bauen – sonst rutschen Fehler in nicht-lokalen
+# Manifesten am Pre-Push-Check (flux-check) vorbei.
+if [[ $# -gt 0 ]]; then
+  PATHS=("$@")
+else
+  PATHS=(clusters/local clusters/pi)
+fi
+
+for path in "${PATHS[@]}"; do
+  echo "── ${path}"
+  flux-local build ks --path "${path}" | kustomize cfg count
+done

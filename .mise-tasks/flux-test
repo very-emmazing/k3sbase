@@ -1,4 +1,16 @@
 #!/usr/bin/env bash
-#MISE description="Volle Test-Suite inkl. Helm-Template-Validierung"
+#MISE description="Volle Test-Suite inkl. Helm-Template-Validierung (ohne Argument: alle Cluster)"
 set -euo pipefail
-flux-local test --enable-helm -v
+
+# Pro Cluster-Pfad laufen lassen: ohne --path scannt flux-local das ganze Repo
+# und bricht ab, weil beide Cluster eine Kustomization "infrastructure" haben.
+if [[ $# -gt 0 ]]; then
+  PATHS=("$@")
+else
+  PATHS=(clusters/local clusters/pi)
+fi
+
+for path in "${PATHS[@]}"; do
+  echo "── ${path}"
+  flux-local test --enable-helm -v --path "${path}"
+done
