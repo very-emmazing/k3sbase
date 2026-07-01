@@ -119,14 +119,14 @@ if [[ "${CLUSTER}" == "pi" ]]; then
     echo "  k3s bereits installiert – übersprungen"
   else
     ssh_do "${PI_SERVER}" "
-      curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION="${K3S_VERSION}" sh -s - server \
+      curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION=\"${K3S_VERSION}\" sh -s - server \
         --disable traefik \
         --disable servicelb \
         --disable local-storage \
         --flannel-backend=none \
         --disable-network-policy \
         --disable-kube-proxy \
-        --tls-san ${PI_SERVER}
+        --tls-san \"${PI_SERVER}\"
     "
     # Kein Ready-Wait: ohne CNI (flannel-backend=none) bleiben Nodes NotReady
     # bis cilium-up gelaufen ist – Ready-Warten wäre ein garantierter Timeout.
@@ -154,11 +154,13 @@ if [[ "${CLUSTER}" == "pi" ]]; then
     if ssh_do "${agent}" "command -v k3s &>/dev/null"; then
       echo "bereits installiert"
     else
-      ssh_do "${agent}" "
+      # Token via stdin statt auf der Remote-Kommandozeile (sonst in ps sichtbar).
+      printf '%s' "${K3S_TOKEN}" | ssh_do "${agent}" "
+        K3S_TOKEN=\"\$(cat)\"
+        export K3S_TOKEN
         curl -sfL https://get.k3s.io | \
-          INSTALL_K3S_VERSION="${K3S_VERSION}" \
-          K3S_URL=https://${PI_SERVER}:6443 \
-          K3S_TOKEN=${K3S_TOKEN} \
+          INSTALL_K3S_VERSION=\"${K3S_VERSION}\" \
+          K3S_URL=\"https://${PI_SERVER}:6443\" \
           sh -
       " >/dev/null
       echo "installiert"
