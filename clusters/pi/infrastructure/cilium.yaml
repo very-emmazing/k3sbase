@@ -8,8 +8,9 @@ spec:
   url: https://helm.cilium.io/
 ---
 # Release name and namespace match the cilium-cli install so Flux can adopt it.
-# k8sServiceHost is set to the Pi server node IP by bootstrap-pi-k3s.sh;
-# verify it matches PI_SERVER in clusters/pi/nodes.env before running pi-flux-bootstrap.
+# k8sServiceHost is set to the Pi server node IP by "mise run cluster-up -- pi";
+# it must match PI_SERVER in clusters/pi/nodes.env and be pushed to origin/main
+# before "mise run flux-bootstrap -- pi" (which verifies both).
 # operator.replicas: 2 for HA across the multi-node cluster.
 apiVersion: helm.toolkit.fluxcd.io/v2
 kind: HelmRelease

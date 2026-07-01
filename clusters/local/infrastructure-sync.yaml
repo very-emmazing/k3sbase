@@ -1,6 +1,6 @@
 # Flux Kustomization for all infrastructure HelmReleases.
 # Separate from the top-level flux-system sync so SOPS decryption is scoped
-# to this path only (the sops-age secret is created imperatively in bootstrap-flux-operator.sh).
+# to this path only (the sops-age secret is created by "mise run flux-bootstrap").
 # sourceRef.name "flux-system": Flux Operator always names the GitRepository it
 # creates for a FluxInstance "flux-system", regardless of the FluxInstance's own name.
 apiVersion: kustomize.toolkit.fluxcd.io/v1

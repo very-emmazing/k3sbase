@@ -82,7 +82,7 @@ Zwingend, wegen Henne-Ei-Abhängigkeiten:
 ### Pi-Cluster (1 Server + 3 Agents)
 
 1. `mise run cluster-up   -- pi` — Chrony (NTP) + k3s auf allen Nodes via SSH; Kubeconfig → `.kube/pi-config`; patcht `k8sServiceHost` in `clusters/pi/infrastructure/cilium.yaml`
-2. `git commit` — cilium.yaml mit Server-IP committen (Schritt 1 gibt Hinweis)
+2. `git commit` + `git push` — cilium.yaml mit Server-IP committen und pushen (Flux reconciliert `origin/main`; `flux-bootstrap` prüft das)
 3. `mise run cilium-up    -- pi` — Cilium imperativ auf Pi-Cluster
 4. `mise run flux-bootstrap -- pi` — Flux auf Pi-Cluster; ab hier übernimmt Flux
 
