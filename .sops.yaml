@@ -1,5 +1,4 @@
-# age recipient is populated by: mise run age-init
-# Never commit the age private key (~/.config/sops/age/keys.txt).
+# Never commit the age private key (/Users/emma/.config/sops/age/keys.txt).
 creation_rules:
   - path_regex: clusters/.*\.yaml$
-    age: ""
+    age: age100029hv4crfdtd2yu8fxvfajjfstjg83x8v6dn5v7preg4j8uq7svyvt6n
