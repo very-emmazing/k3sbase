@@ -1,0 +1,18 @@
+# Component versions for the local (k3d) cluster.
+# Single source of truth for all pinned versions:
+#   - Helm chart versions are injected into HelmReleases via Flux postBuild
+#     substitution (substituteFrom this ConfigMap).
+#   - mise tasks (cilium-up, flux-bootstrap) read values from this file.
+# Committed as a plain manifest (not a configMapGenerator) so flux-local can
+# resolve the substitute reference when validating locally.
+# The Flux distribution version lives in flux-system/flux-instance.yaml.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cluster-versions
+  namespace: flux-system
+data:
+  FLUX_OPERATOR_VERSION: "0.52.0"
+  CILIUM_VERSION: "1.16.5"
+  CERT_MANAGER_VERSION: "v1.16.3"
+  EXTERNAL_DNS_VERSION: "1.15.0"

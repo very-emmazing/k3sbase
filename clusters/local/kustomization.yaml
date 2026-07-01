@@ -2,11 +2,5 @@ apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
   - flux-system/
+  - cluster-versions.yaml
   - infrastructure-sync.yaml
-configMapGenerator:
-  - name: cluster-versions
-    namespace: flux-system
-    envs:
-      - versions.env
-    options:
-      disableNameSuffixHash: true

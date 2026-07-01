@@ -36,11 +36,10 @@ esac
 # Gleiche Chart-Version wie die HelmRelease pinnen – sonst installiert die
 # cilium-cli ihre Default-Version und Flux downgraded den laufenden CNI
 # bei der Adoption.
-VERSIONS_ENV="${REPO_ROOT}/clusters/${CLUSTER}/versions.env"
-[[ -f "${VERSIONS_ENV}" ]] || { echo "Fehler: ${VERSIONS_ENV} fehlt – zuerst: mise run setup -- ${CLUSTER}"; exit 1; }
-# shellcheck source=/dev/null
-source "${VERSIONS_ENV}"
-[[ -n "${CILIUM_VERSION:-}" ]] || { echo "Fehler: CILIUM_VERSION fehlt in ${VERSIONS_ENV}"; exit 1; }
+VERSIONS_CM="${REPO_ROOT}/clusters/${CLUSTER}/cluster-versions.yaml"
+[[ -f "${VERSIONS_CM}" ]] || { echo "Fehler: ${VERSIONS_CM} fehlt"; exit 1; }
+CILIUM_VERSION="$(grep -E '^  CILIUM_VERSION:' "${VERSIONS_CM}" | awk '{print $2}' | tr -d '"')"
+[[ -n "${CILIUM_VERSION}" ]] || { echo "Fehler: CILIUM_VERSION fehlt in ${VERSIONS_CM}"; exit 1; }
 
 if [[ "${CLUSTER}" == "local" ]]; then
   export KUBECONFIG="${REPO_ROOT}/.kube/config"

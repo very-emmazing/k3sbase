@@ -12,10 +12,10 @@ case "${CLUSTER}" in
   *) printf "Unbekannter Cluster '%s'. Erlaubt: local | pi\n" "${CLUSTER}" >&2; exit 1 ;;
 esac
 
-VERSIONS_ENV="${REPO_ROOT}/clusters/${CLUSTER}/versions.env"
-[[ -f "${VERSIONS_ENV}" ]] || { echo "Fehler: ${VERSIONS_ENV} fehlt – zuerst: mise run setup -- ${CLUSTER}"; exit 1; }
-# shellcheck source=/dev/null
-source "${VERSIONS_ENV}"
+VERSIONS_CM="${REPO_ROOT}/clusters/${CLUSTER}/cluster-versions.yaml"
+[[ -f "${VERSIONS_CM}" ]] || { echo "Fehler: ${VERSIONS_CM} fehlt"; exit 1; }
+FLUX_OPERATOR_VERSION="$(grep -E '^  FLUX_OPERATOR_VERSION:' "${VERSIONS_CM}" | awk '{print $2}' | tr -d '"')"
+[[ -n "${FLUX_OPERATOR_VERSION}" ]] || { echo "Fehler: FLUX_OPERATOR_VERSION fehlt in ${VERSIONS_CM}"; exit 1; }
 
 if [[ "${CLUSTER}" == "local" ]]; then
   export KUBECONFIG="${REPO_ROOT}/.kube/config"
