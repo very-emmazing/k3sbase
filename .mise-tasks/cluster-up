@@ -36,6 +36,22 @@ if [[ "${CLUSTER}" == "local" ]]; then
   chmod 600 "${REPO_ROOT}/.kube/config"
   echo "Kubeconfig: ${REPO_ROOT}/.kube/config"
 
+  # ── Cilium HelmRelease patchen ───────────────────────────────────────────────
+  # Docker-Hostname ("k3d-local-server-0") ist nur vom Server-Node selbst auflösbar;
+  # von anderen Nodes (z.B. zusätzliche Agents) scheitert die Pod-DNS-Auflösung.
+  # Daher die konkrete Container-IP im Docker-Netzwerk verwenden.
+  CILIUM_MANIFEST="${REPO_ROOT}/clusters/local/infrastructure/cilium.yaml"
+  SERVER_IP="$(docker inspect -f "{{ (index .NetworkSettings.Networks \"k3d-${CLUSTER}\").IPAddress }}" "k3d-${CLUSTER}-server-0")"
+  if [[ -n "${SERVER_IP}" ]] && grep -q 'REPLACE_WITH_LOCAL_SERVER_IP' "${CILIUM_MANIFEST}"; then
+    TMP_FILE="$(mktemp)"
+    sed "s|REPLACE_WITH_LOCAL_SERVER_IP|${SERVER_IP}|g" "${CILIUM_MANIFEST}" > "${TMP_FILE}" && mv "${TMP_FILE}" "${CILIUM_MANIFEST}"
+    echo
+    echo "  cilium.yaml aktualisiert (k8sServiceHost: ${SERVER_IP})"
+    echo "  Bitte vor cilium-up committen:"
+    echo "    git add clusters/local/infrastructure/cilium.yaml"
+    echo "    git commit -m 'chore(local): set cilium api server host'"
+  fi
+
   printf "\nWeiter mit:\n"
   printf "  mise run cilium-up     -- %s\n" "${CLUSTER}"
   printf "  mise run flux-bootstrap -- %s\n" "${CLUSTER}"
@@ -154,7 +170,8 @@ if [[ "${CLUSTER}" == "pi" ]]; then
 
   # ── Cilium HelmRelease patchen ───────────────────────────────────────────────
   if grep -q 'REPLACE_WITH_PI_SERVER_IP' "${CILIUM_MANIFEST}"; then
-    sed -i "s|REPLACE_WITH_PI_SERVER_IP|${PI_SERVER}|g" "${CILIUM_MANIFEST}"
+    TMP_FILE="$(mktemp)"
+    sed "s|REPLACE_WITH_PI_SERVER_IP|${PI_SERVER}|g" "${CILIUM_MANIFEST}" > "${TMP_FILE}" && mv "${TMP_FILE}" "${CILIUM_MANIFEST}"
     echo
     echo "  cilium.yaml aktualisiert (k8sServiceHost: ${PI_SERVER})"
     echo "  Bitte vor cilium-up committen:"

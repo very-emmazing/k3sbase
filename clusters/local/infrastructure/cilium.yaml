@@ -8,9 +8,12 @@ spec:
   url: https://helm.cilium.io/
 ---
 # Release name and namespace match the cilium-cli install so Flux can adopt it.
-# k8sServiceHost: k3d server container hostname within the Docker network;
-#   follows the k3d naming convention k3d-<cluster-name>-server-0.
-#   Adjust if the cluster is named differently.
+# k8sServiceHost: IP des k3d-Server-Containers im Docker-Netzwerk.
+#   Der Docker-Hostname (z.B. "k3d-local-server-0") ist nur vom Server-Node
+#   selbst auflösbar (kubelet trägt ihn dort per Selbst-Eintrag in /etc/hosts
+#   ein); von anderen Nodes (z.B. per "k3d node create" hinzugefügte Agents)
+#   scheitert die Pod-DNS-Auflösung. Daher die konkrete IP verwenden – wird
+#   von "mise run cluster-up -- local" automatisch ermittelt und gepatcht.
 apiVersion: helm.toolkit.fluxcd.io/v2
 kind: HelmRelease
 metadata:
@@ -28,7 +31,7 @@ spec:
         namespace: flux-system
   values:
     kubeProxyReplacement: true
-    k8sServiceHost: "k3d-local-server-0"
+    k8sServiceHost: "REPLACE_WITH_LOCAL_SERVER_IP"
     k8sServicePort: "6443"
     operator:
       replicas: 1
