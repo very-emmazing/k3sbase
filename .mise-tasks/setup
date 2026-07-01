@@ -81,9 +81,8 @@ if [[ "${CLUSTER}" == "pi" ]]; then
   }
 
   if _nodes_ok; then
-    # _nodes_ok runs in a subshell; source again here to export vars into this shell.
-    # shellcheck source=/dev/null
-    source "${NODES_ENV}"
+    # _nodes_ok läuft in dieser Shell (Funktion, keine Subshell) – die Variablen
+    # aus nodes.env sind hier bereits gesetzt.
     ok "Bereits konfiguriert: server=${PI_SERVER}  agents=${PI_AGENT_0} ${PI_AGENT_1} ${PI_AGENT_2}"
   else
     hint "Voraussetzung: Ubuntu auf allen Nodes, SSH-Pubkey bereits hinterlegt"
