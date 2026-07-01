@@ -44,56 +44,44 @@ source "${VERSIONS_ENV}"
 
 if [[ "${CLUSTER}" == "local" ]]; then
   export KUBECONFIG="${REPO_ROOT}/.kube/config"
-  [[ -f "${KUBECONFIG}" ]] || { echo "Fehler: ${KUBECONFIG} fehlt – zuerst: mise run cluster-up -- local"; exit 1; }
+else
+  export KUBECONFIG="${REPO_ROOT}/.kube/pi-config"
+fi
+[[ -f "${KUBECONFIG}" ]] || { echo "Fehler: ${KUBECONFIG} fehlt – zuerst: mise run cluster-up -- ${CLUSTER}"; exit 1; }
 
-  # k8sServiceHost wird aus der HelmRelease gelesen (single source of truth,
-  # von "mise run cluster-up -- local" mit der Server-Container-IP gepatcht).
-  CILIUM_MANIFEST="${REPO_ROOT}/clusters/local/infrastructure/cilium.yaml"
-  if grep -q 'REPLACE_WITH_LOCAL_SERVER_IP' "${CILIUM_MANIFEST}"; then
-    echo "Fehler: k8sServiceHost in ${CILIUM_MANIFEST} noch nicht gesetzt."
-    echo "  mise run cluster-up -- local ausführen und cilium.yaml danach committen."
-    exit 1
-  fi
-  SERVER_IP="$(grep -oE 'k8sServiceHost: "[^"]+"' "${CILIUM_MANIFEST}" | cut -d'"' -f2)"
-  [[ -n "${SERVER_IP}" ]] || { echo "Fehler: k8sServiceHost nicht gefunden in ${CILIUM_MANIFEST}"; exit 1; }
+# k8sServiceHost wird aus der HelmRelease gelesen (single source of truth,
+# von "mise run cluster-up -- <cluster>" gepatcht) – so kann der imperative
+# Install nicht von dem abweichen, was Flux später reconciliert.
+CILIUM_MANIFEST="${REPO_ROOT}/clusters/${CLUSTER}/infrastructure/cilium.yaml"
+if grep -q 'REPLACE_WITH_' "${CILIUM_MANIFEST}"; then
+  echo "Fehler: k8sServiceHost in ${CILIUM_MANIFEST} noch nicht gesetzt."
+  echo "  mise run cluster-up -- ${CLUSTER} ausführen und cilium.yaml danach committen."
+  exit 1
+fi
+SERVER_IP="$(grep -oE 'k8sServiceHost: "[^"]+"' "${CILIUM_MANIFEST}" | cut -d'"' -f2)"
+[[ -n "${SERVER_IP}" ]] || { echo "Fehler: k8sServiceHost nicht gefunden in ${CILIUM_MANIFEST}"; exit 1; }
 
-  if cilium status &>/dev/null; then
-    echo "Cilium bereits installiert – übersprungen"
-  else
-    cilium install \
-      --version "${CILIUM_VERSION}" \
-      --set kubeProxyReplacement=true \
-      --set k8sServiceHost="${SERVER_IP}" \
-      --set k8sServicePort=6443 \
-      --set cgroup.autoMount.enabled=false \
-      --set cgroup.hostRoot=/sys/fs/cgroup \
-      --set socketLB.hostNamespaceOnly=true
-
-    cilium status --wait
-    echo "Cilium bereit"
-  fi
+# socketLB.hostNamespaceOnly nur für k3d (Begründung siehe Kopfkommentar).
+EXTRA_ARGS=()
+if [[ "${CLUSTER}" == "local" ]]; then
+  EXTRA_ARGS+=(--set socketLB.hostNamespaceOnly=true)
 fi
 
-if [[ "${CLUSTER}" == "pi" ]]; then
-  export KUBECONFIG="${REPO_ROOT}/.kube/pi-config"
-  [[ -f "${KUBECONFIG}" ]] || { echo "Fehler: ${KUBECONFIG} fehlt – zuerst: mise run cluster-up -- pi"; exit 1; }
+# helm status statt "cilium status" als Installiert-Check: Letzteres schlägt
+# auch bei installiertem, aber (noch) ungesundem Cilium fehl und würde dann
+# ein erneutes "cilium install" mit hartem Fehler triggern.
+if helm status cilium -n kube-system &>/dev/null; then
+  echo "Cilium bereits installiert – übersprungen"
+else
+  cilium install \
+    --version "${CILIUM_VERSION}" \
+    --set kubeProxyReplacement=true \
+    --set k8sServiceHost="${SERVER_IP}" \
+    --set k8sServicePort=6443 \
+    --set cgroup.autoMount.enabled=false \
+    --set cgroup.hostRoot=/sys/fs/cgroup \
+    ${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"}
 
-  # shellcheck source=/dev/null
-  source "${REPO_ROOT}/clusters/pi/nodes.env"
-  [[ -z "${PI_SERVER:-}" ]] && { echo "Fehler: PI_SERVER nicht gesetzt in clusters/pi/nodes.env"; exit 1; }
-
-  if cilium status &>/dev/null; then
-    echo "Cilium bereits installiert – übersprungen"
-  else
-    cilium install \
-      --version "${CILIUM_VERSION}" \
-      --set kubeProxyReplacement=true \
-      --set k8sServiceHost="${PI_SERVER}" \
-      --set k8sServicePort=6443 \
-      --set cgroup.autoMount.enabled=false \
-      --set cgroup.hostRoot=/sys/fs/cgroup
-
-    cilium status --wait
-    echo "Cilium bereit"
-  fi
+  cilium status --wait
+  echo "Cilium bereit"
 fi
