@@ -94,3 +94,64 @@ Cilium wird nach dem Bootstrap per Helm-Release-Adoption von Flux übernommen (H
 - `dependsOn` nutzen, wo Reihenfolge nötig ist (Cilium ready vor cert-manager/external-dns)
 - Namespaces explizit deklarieren
 - Vor Commit lokal validieren (`kubeconform`/`kube-score`/`flux diff`, soweit anwendbar)
+
+# Flux MCP — Betriebsregeln (read-only, k3d)
+
+Regeln für `flux-operator-mcp`-Server. Zweck: Flux-Operator-verwaltete GitOps-Pipelines analysieren + troubleshooten.
+
+## Kontext & Modus
+
+- Server läuft **read-only**. Zustandsverändernde Tools (`reconcile_*`, `suspend_*`, `resume_*`, `apply_kubernetes_manifest`, `delete_kubernetes_resource`) deaktiviert — nie aufrufen.
+- Genau **ein k3d-Cluster**, **ein** kubeconfig-Context. Kein Cluster-Wechsel, keine Cross-Cluster-Vergleiche. Context-Name: `k3d-local` (k3d präfixt Contexts mit `k3d-`).
+- Secret-Werte vom Server maskiert. Nie entmaskieren.
+
+## Wenn eine mutierende Aktion verlangt wird
+
+Reconcile, Suspend/Resume, Apply, Delete gewünscht: **nicht** via MCP (deaktiviert). Stattdessen passendes `flux`-/`kubectl`-Kommando ausgeben, Nutzerin führt selbst aus. Beispiel:
+`flux reconcile kustomization <name> -n <namespace> --with-source`.
+
+## Tool-Grundregeln
+
+- Installationsstatus, Controller-Health, Versionen → `get_flux_instance`.
+- Beliebige k8s-/Flux-Ressourcen inkl. Status, Conditions, Events → `get_kubernetes_resources`.
+- **apiVersion nie raten** → vorher `get_kubernetes_api_versions`, preferred Version nutzen.
+- Flux-CRD-Details → `search_flux_docs` mit Kind als Query, nicht aus Gedächtnis.
+- Flux-verwaltet? In `metadata` nach `fluxcd`-Labels/Annotationen suchen.
+- CPU/Memory pro Pod → `get_kubernetes_metrics` (k3s hat metrics-server, läuft out of the box).
+
+## Flux-CRDs (Kurzreferenz)
+
+- **FluxInstance / FluxReport** — Installation bzw. gemeldeter Zustand.
+- **ResourceSet / ResourceSetInputProvider** — Ressourcengruppen aus Input-Matrizen.
+- **GitRepository / OCIRepository / Bucket / HelmRepository / HelmChart** — Sources.
+- **Kustomization** — baut + appliziert Manifeste aus Source.
+- **HelmRelease** — verwaltet Helm-Releases aus Source.
+- **Alert / Provider / Receiver** — Notifications + Webhooks.
+- **ImageRepository / ImagePolicy / ImageUpdateAutomation** — Image-Automation.
+
+## Playbook: HelmRelease-Diagnose
+
+1. `get_flux_instance` → helm-controller-Status + apiVersion von Kind HelmRelease prüfen.
+2. `get_kubernetes_resources` → HelmRelease holen; spec, status, inventory, events lesen.
+3. Managing object über Annotationen bestimmen (Kustomization oder ResourceSet).
+4. Falls `valuesFrom` gesetzt: referenzierte ConfigMaps/Secrets nachladen.
+5. Source via `chartRef`/`sourceRef` identifizieren, Status/Events prüfen.
+6. Bei failed/in-progress: managed resources aus inventory holen, Status prüfen; bei Fehlern Logs via `get_kubernetes_logs`.
+7. Root-Cause-Report. Nichts kaputt: Status von HelmRelease, managed resources, Container-Images berichten.
+
+## Playbook: Kustomization-Diagnose
+
+1. `get_flux_instance` → kustomize-controller-Status + apiVersion von Kind Kustomization.
+2. `get_kubernetes_resources` → Kustomization holen; spec, status, inventory, events analysieren.
+3. Managing object über Annotationen bestimmen (andere Kustomization oder ResourceSet).
+4. Falls `substituteFrom` gesetzt: referenzierte ConfigMaps/Secrets nachladen.
+5. Source via `sourceRef` identifizieren, Status/Events prüfen.
+6. Bei failed/in-progress: managed resources aus inventory holen, Status prüfen, bei Fehlern Logs analysieren.
+7. Root-Cause- bzw. Status-Report erstellen.
+
+## Playbook: Log-Analyse
+
+1. Pod-Name bestimmen: managendes Deployment via `get_kubernetes_resources` holen.
+2. `matchLabels` + Container-Namen aus Deployment-spec lesen.
+3. Pods via `matchLabels` mit `get_kubernetes_resources` listen.
+4. Logs via `get_kubernetes_logs` mit Pod-/Container-Namen (`previous: true` falls Container abgestürzt).
