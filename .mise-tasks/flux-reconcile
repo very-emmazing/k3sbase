@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+#MISE description="Alle Flux-Ressourcen im Cluster reconcilen"
+# flux-system Kustomization pullt die GitRepository-Source neu; alle anderen
+# Kustomizations (infrastructure, ...) referenzieren dieselbe Source und werden
+# vom kustomize-controller bei neuer Revision automatisch requeued – kein
+# manuelles Loopen über alle Kustomizations/HelmReleases nötig.
+set -euo pipefail
+
+CLUSTER="${1:?Fehler: Cluster angeben – z.B.: mise run flux-reconcile -- local}"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+case "${CLUSTER}" in
+  local|pi) ;;
+  *) printf "Unbekannter Cluster '%s'. Erlaubt: local | pi\n" "${CLUSTER}" >&2; exit 1 ;;
+esac
+
+if [[ "${CLUSTER}" == "local" ]]; then
+  export KUBECONFIG="${REPO_ROOT}/.kube/config"
+else
+  export KUBECONFIG="${REPO_ROOT}/.kube/pi-config"
+fi
+[[ -f "${KUBECONFIG}" ]] || { echo "Fehler: ${KUBECONFIG} fehlt – zuerst: mise run cluster-up -- ${CLUSTER}"; exit 1; }
+
+flux reconcile kustomization flux-system --with-source
