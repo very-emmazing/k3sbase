@@ -131,7 +131,13 @@ else
     warn "Plaintext-Token gefunden – wird direkt verschlüsselt"
     CF_TOKEN="${EXISTING}"
   fi
-  cat > "${REPO_ROOT}/${CF_SECRET}" <<YAML
+  # Plaintext nie in die getrackte Datei schreiben: schlüge sops fehl, läge der
+  # Token sonst unverschlüsselt im Repo (ein "git add ." vom Leak entfernt).
+  # --filename-override lässt die creation_rules aus .sops.yaml trotz Tempfile
+  # auf den Zielpfad matchen.
+  TMP_SECRET="$(mktemp)"
+  trap 'rm -f "${TMP_SECRET}" "${TMP_SECRET}.enc"' EXIT
+  cat > "${TMP_SECRET}" <<YAML
 apiVersion: v1
 kind: Secret
 metadata:
@@ -140,7 +146,10 @@ metadata:
 stringData:
   token: "${CF_TOKEN}"
 YAML
-  SOPS_AGE_KEY_FILE="${AGE_KEY_FILE}" sops -e -i "${REPO_ROOT}/${CF_SECRET}"
+  SOPS_AGE_KEY_FILE="${AGE_KEY_FILE}" sops -e --filename-override "${CF_SECRET}" \
+    "${TMP_SECRET}" > "${TMP_SECRET}.enc"
+  mv "${TMP_SECRET}.enc" "${REPO_ROOT}/${CF_SECRET}"
+  rm -f "${TMP_SECRET}"
   ok "Verschlüsselt: ${CF_SECRET}"
   CF_SECRET_UPDATED=true
 fi
