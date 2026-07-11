@@ -8,7 +8,7 @@ sops              = "3.13.2"
 k3d               = "5.9.0"
 # cilium-cli: if not found, use: mise use "aqua:cilium/cilium-cli"
 cilium-cli        = "0.19.5"
-"pipx:flux-local" = "8.3.0"
+"pipx:flux-local" = "7.11.0"
 
 [env]
 # Defaults to the local k3d cluster; override for pi: KUBECONFIG=.kube/pi-config kubectl ...
