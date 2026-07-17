@@ -69,22 +69,33 @@ fi
 if [[ "${CLUSTER}" == "pi" ]]; then
   NODES_ENV="${REPO_ROOT}/clusters/pi/nodes.env"
   VERSIONS_CM="${REPO_ROOT}/clusters/pi/cluster-versions.yaml"
+  SETTINGS_CM="${REPO_ROOT}/clusters/pi/cluster-settings.yaml"
   CILIUM_MANIFEST="${REPO_ROOT}/clusters/pi/infrastructure/cilium.yaml"
   PI_KUBECONFIG="${REPO_ROOT}/.kube/pi-config"
 
   [[ -f "${NODES_ENV}" ]]    || { echo "Fehler: ${NODES_ENV} fehlt – zuerst: mise run setup -- pi"; exit 1; }
   [[ -f "${VERSIONS_CM}" ]]  || { echo "Fehler: ${VERSIONS_CM} fehlt"; exit 1; }
+  [[ -f "${SETTINGS_CM}" ]]  || { echo "Fehler: ${SETTINGS_CM} fehlt"; exit 1; }
   # shellcheck source=/dev/null
   source "${NODES_ENV}"
   K3S_VERSION="$(grep -E '^  K3S_VERSION:' "${VERSIONS_CM}" | awk '{print $2}' | tr -d '"')"
   [[ -n "${K3S_VERSION}" ]] || { echo "Fehler: K3S_VERSION fehlt in ${VERSIONS_CM}"; exit 1; }
 
-  for var in PI_USER PI_SERVER PI_AGENT_0 PI_AGENT_1 PI_AGENT_2; do
-    [[ -z "${!var:-}" ]] && { echo "Fehler: ${var} ist leer in ${NODES_ENV}"; exit 1; }
+  # IPv6-only: Pod-/Service-CIDR aus cluster-settings.yaml (gleiche Quelle wie
+  # ipv6NativeRoutingCIDR in der Cilium-HelmRelease).
+  CLUSTER_CIDR="$(grep -E '^  CLUSTER_CIDR:' "${SETTINGS_CM}" | awk '{print $2}' | tr -d '"')"
+  SERVICE_CIDR="$(grep -E '^  SERVICE_CIDR:' "${SETTINGS_CM}" | awk '{print $2}' | tr -d '"')"
+  [[ -n "${CLUSTER_CIDR}" && -n "${SERVICE_CIDR}" ]] || { echo "Fehler: CLUSTER_CIDR/SERVICE_CIDR fehlt in ${SETTINGS_CM}"; exit 1; }
+
+  for var in PI_USER PI_SERVER PI_AGENT_0 PI_AGENT_1 PI_AGENT_2 \
+             PI_SERVER_ULA PI_AGENT_0_ULA PI_AGENT_1_ULA PI_AGENT_2_ULA; do
+    [[ -z "${!var:-}" ]] && { echo "Fehler: ${var} ist leer in ${NODES_ENV} – zuerst: mise run setup -- pi"; exit 1; }
   done
 
   ALL_NODES=("${PI_SERVER}" "${PI_AGENT_0}" "${PI_AGENT_1}" "${PI_AGENT_2}")
   AGENTS=("${PI_AGENT_0}" "${PI_AGENT_1}" "${PI_AGENT_2}")
+  # Parallel zu AGENTS: statische ULA je Agent (k3s --node-ip).
+  AGENT_ULAS=("${PI_AGENT_0_ULA}" "${PI_AGENT_1_ULA}" "${PI_AGENT_2_ULA}")
 
   ssh_do() {
     local node="$1"; shift
@@ -118,6 +129,10 @@ if [[ "${CLUSTER}" == "pi" ]]; then
   if ssh_do "${PI_SERVER}" "command -v k3s &>/dev/null"; then
     echo "  k3s bereits installiert – übersprungen"
   else
+    # IPv6-only: --node-ip=ULA macht die ULA zur Node-InternalIP und lässt den
+    # kube-apiserver eine IPv6-Advertise-Adresse ableiten (Pflicht, wenn die
+    # Service-CIDR IPv6 ist). Management/SSH läuft weiter über die IPv4-IP,
+    # daher beide als tls-san.
     ssh_do "${PI_SERVER}" "
       curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION=\"${K3S_VERSION}\" sh -s - server \
         --disable traefik \
@@ -126,7 +141,11 @@ if [[ "${CLUSTER}" == "pi" ]]; then
         --flannel-backend=none \
         --disable-network-policy \
         --disable-kube-proxy \
-        --tls-san \"${PI_SERVER}\"
+        --cluster-cidr \"${CLUSTER_CIDR}\" \
+        --service-cidr \"${SERVICE_CIDR}\" \
+        --node-ip \"${PI_SERVER_ULA}\" \
+        --tls-san \"${PI_SERVER}\" \
+        --tls-san \"${PI_SERVER_ULA}\"
     "
     # Kein Ready-Wait: ohne CNI (flannel-backend=none) bleiben Nodes NotReady
     # bis cilium-up gelaufen ist – Ready-Warten wäre ein garantierter Timeout.
@@ -149,19 +168,23 @@ if [[ "${CLUSTER}" == "pi" ]]; then
   echo
   echo "=== [3/4] k3s Agents ==="
   AGENTS_INSTALLED=false
-  for agent in "${AGENTS[@]}"; do
+  for i in "${!AGENTS[@]}"; do
+    agent="${AGENTS[$i]}"
+    agent_ula="${AGENT_ULAS[$i]}"
     printf "  %-18s " "${agent}"
     if ssh_do "${agent}" "command -v k3s &>/dev/null"; then
       echo "bereits installiert"
     else
       # Token via stdin statt auf der Remote-Kommandozeile (sonst in ps sichtbar).
+      # Join weiter über die IPv4-Management-IP (tls-san), --node-ip=ULA macht
+      # die ULA zur Node-InternalIP (IPv6-only-Datapath).
       printf '%s' "${K3S_TOKEN}" | ssh_do "${agent}" "
         K3S_TOKEN=\"\$(cat)\"
         export K3S_TOKEN
         curl -sfL https://get.k3s.io | \
           INSTALL_K3S_VERSION=\"${K3S_VERSION}\" \
           K3S_URL=\"https://${PI_SERVER}:6443\" \
-          sh -
+          sh -s - --node-ip \"${agent_ula}\"
       " >/dev/null
       echo "installiert"
       AGENTS_INSTALLED=true
@@ -193,14 +216,14 @@ if [[ "${CLUSTER}" == "pi" ]]; then
   echo "  Geschrieben: ${PI_KUBECONFIG}"
 
   # ── Cilium HelmRelease patchen ───────────────────────────────────────────────
-  # Immer mit PI_SERVER abgleichen (nicht nur Platzhalter ersetzen), damit eine
-  # geänderte Server-IP in nodes.env nicht stale im Manifest zurückbleibt.
+  # Immer mit PI_SERVER_ULA abgleichen (nicht nur Platzhalter ersetzen), damit
+  # eine geänderte Server-ULA in nodes.env nicht stale im Manifest zurückbleibt.
   CURRENT_HOST="$(grep -oE 'k8sServiceHost: "[^"]*"' "${CILIUM_MANIFEST}" | cut -d'"' -f2)"
-  if [[ "${CURRENT_HOST}" != "${PI_SERVER}" ]]; then
+  if [[ "${CURRENT_HOST}" != "${PI_SERVER_ULA}" ]]; then
     TMP_FILE="$(mktemp)"
-    sed "s|k8sServiceHost: \"[^\"]*\"|k8sServiceHost: \"${PI_SERVER}\"|" "${CILIUM_MANIFEST}" > "${TMP_FILE}" && mv "${TMP_FILE}" "${CILIUM_MANIFEST}"
+    sed "s|k8sServiceHost: \"[^\"]*\"|k8sServiceHost: \"${PI_SERVER_ULA}\"|" "${CILIUM_MANIFEST}" > "${TMP_FILE}" && mv "${TMP_FILE}" "${CILIUM_MANIFEST}"
     echo
-    echo "  cilium.yaml aktualisiert (k8sServiceHost: ${CURRENT_HOST:-<leer>} → ${PI_SERVER})"
+    echo "  cilium.yaml aktualisiert (k8sServiceHost: ${CURRENT_HOST:-<leer>} → ${PI_SERVER_ULA})"
     echo "  Bitte vor cilium-up committen und pushen (Flux reconciliert origin/main):"
     echo "    git add clusters/pi/infrastructure/cilium.yaml"
     echo "    git commit -m 'chore(pi): set cilium api server host'"

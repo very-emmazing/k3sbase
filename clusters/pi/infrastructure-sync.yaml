@@ -11,6 +11,22 @@ spec:
     kind: GitRepository
     name: flux-system
     namespace: flux-system
+  # Gateway-API-CRDs müssen Established sein, bevor Cilium mit
+  # gatewayAPI.enabled=true reconciled wird.
+  dependsOn:
+    - name: gateway-api-crds
+  # Ready erst, wenn Cilium und cert-manager wirklich installiert sind:
+  # die apps-Kustomization (dependsOn: infrastructure) appliziert CRs
+  # (ClusterIssuer, Gateway), deren CRDs von diesen Releases kommen.
+  healthChecks:
+    - apiVersion: helm.toolkit.fluxcd.io/v2
+      kind: HelmRelease
+      name: cilium
+      namespace: kube-system
+    - apiVersion: helm.toolkit.fluxcd.io/v2
+      kind: HelmRelease
+      name: cert-manager
+      namespace: cert-manager
   decryption:
     provider: sops
     secretRef:
@@ -19,3 +35,5 @@ spec:
     substituteFrom:
       - kind: ConfigMap
         name: cluster-versions
+      - kind: ConfigMap
+        name: cluster-settings
