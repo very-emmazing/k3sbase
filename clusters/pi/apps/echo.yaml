@@ -1,0 +1,188 @@
+# Beispiel-Workload zum End-to-End-Test der Routing-Kette
+# (extern: Cloudflare-Tunnel → Gateway, intern: LAN → Gateway-ULA).
+# Zwei Echo-Deployments mit je eigenem Hostname, damit das
+# HTTPRoute-Hostname-Matching testbar ist (siehe TESTPLAN.md).
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: echo
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: echo-a
+  namespace: echo
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: echo-a
+  template:
+    metadata:
+      labels:
+        app: echo-a
+    spec:
+      containers:
+        - name: whoami
+          # Multi-Arch (arm64), gibt Request-Details + "Name:" zurück –
+          # macht sichtbar, welches Backend die HTTPRoute getroffen hat.
+          image: traefik/whoami:v1.10.1
+          env:
+            - name: WHOAMI_NAME
+              value: echo-a
+          ports:
+            - containerPort: 80
+          resources:
+            requests:
+              cpu: 5m
+              memory: 16Mi
+            limits:
+              memory: 32Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: echo-a
+  namespace: echo
+spec:
+  selector:
+    app: echo-a
+  ports:
+    - port: 80
+      targetPort: 80
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: echo-b
+  namespace: echo
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: echo-b
+  template:
+    metadata:
+      labels:
+        app: echo-b
+    spec:
+      containers:
+        - name: whoami
+          image: traefik/whoami:v1.10.1
+          env:
+            - name: WHOAMI_NAME
+              value: echo-b
+          ports:
+            - containerPort: 80
+          resources:
+            requests:
+              cpu: 5m
+              memory: 16Mi
+            limits:
+              memory: 32Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: echo-b
+  namespace: echo
+spec:
+  selector:
+    app: echo-b
+  ports:
+    - port: 80
+      targetPort: 80
+---
+# Wildcard-Zertifikat für alle Gateway-Hostnames (DNS-01 erlaubt Wildcards).
+# Das Gateway referenziert das erzeugte Secret; cloudflared verifiziert beim
+# Upstream-TLS-Handshake gegen genau dieses Zertifikat.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: echo-wildcard-tls
+  namespace: echo
+spec:
+  secretName: echo-wildcard-tls
+  dnsNames:
+    - "*.${PI_DOMAIN}"
+  issuerRef:
+    kind: ClusterIssuer
+    name: letsencrypt
+---
+# Statische ULA für den vom Cilium-Operator generierten Gateway-Service
+# (cilium-gateway-web-gateway). Cilium ignoriert Gateway.spec.addresses
+# (cilium/cilium#30123, "closed as not planned") und spec.externalIPs ist
+# auf dem generierten Service nicht setzbar – der unterstützte Weg zu einer
+# statischen IP ist LB-IPAM: Pool mit genau einer /128 + Pinning über die
+# lbipam.cilium.io/ips-Annotation (via Gateway spec.infrastructure).
+# Kein L2-Announcement, keine dynamische Vergabe: der serviceSelector bindet
+# den Pool exakt an diesen einen Service, und die ULA liegt statisch auf den
+# Node-Interfaces (siehe README). Datapath-Verhalten ist identisch zu
+# externalIPs: Cilium-eBPF forwardet Traffic, der an einem Node für diese
+# IP ankommt, an die Gateway-Backends.
+apiVersion: cilium.io/v2alpha1
+kind: CiliumLoadBalancerIPPool
+metadata:
+  name: gateway-ula
+spec:
+  blocks:
+    - cidr: "${GATEWAY_ULA}/128"
+  serviceSelector:
+    matchLabels:
+      io.kubernetes.service.namespace: echo
+      io.kubernetes.service.name: cilium-gateway-web-gateway
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: web-gateway
+  namespace: echo
+spec:
+  gatewayClassName: cilium
+  infrastructure:
+    annotations:
+      # Wird von Cilium auf den generierten LoadBalancer-Service propagiert
+      # und pinnt die LB-IPAM-Zuteilung auf die statische Gateway-ULA.
+      lbipam.cilium.io/ips: "${GATEWAY_ULA}"
+  listeners:
+    - name: https
+      protocol: HTTPS
+      port: 443
+      hostname: "*.${PI_DOMAIN}"
+      allowedRoutes:
+        namespaces:
+          from: Same
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - name: echo-wildcard-tls
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: echo-a
+  namespace: echo
+spec:
+  parentRefs:
+    - name: web-gateway
+  hostnames:
+    - "echo-a.${PI_DOMAIN}"
+  rules:
+    - backendRefs:
+        - name: echo-a
+          port: 80
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: echo-b
+  namespace: echo
+spec:
+  parentRefs:
+    - name: web-gateway
+  hostnames:
+    - "echo-b.${PI_DOMAIN}"
+  rules:
+    - backendRefs:
+        - name: echo-b
+          port: 80
