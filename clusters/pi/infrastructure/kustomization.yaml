@@ -5,3 +5,5 @@ resources:
 - cilium.yaml
 - external-dns-secret.yaml
 - cert-manager-secret.yaml
+- cloudflared.yaml
+- cloudflared-credentials-secret.yaml
