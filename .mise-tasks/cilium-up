@@ -61,9 +61,42 @@ SERVER_IP="$(grep -oE 'k8sServiceHost: "[^"]+"' "${CILIUM_MANIFEST}" | cut -d'"'
 [[ -n "${SERVER_IP}" ]] || { echo "Fehler: k8sServiceHost nicht gefunden in ${CILIUM_MANIFEST}"; exit 1; }
 
 # socketLB.hostNamespaceOnly nur für k3d (Begründung siehe Kopfkommentar).
+# pi: IPv6-only-Werte müssen exakt mit der HelmRelease
+# (clusters/pi/infrastructure/cilium.yaml) übereinstimmen, sonst ändert Flux
+# bei der Adoption die laufende CNI-Konfiguration.
 EXTRA_ARGS=()
 if [[ "${CLUSTER}" == "local" ]]; then
   EXTRA_ARGS+=(--set socketLB.hostNamespaceOnly=true)
+else
+  SETTINGS_CM="${REPO_ROOT}/clusters/pi/cluster-settings.yaml"
+  [[ -f "${SETTINGS_CM}" ]] || { echo "Fehler: ${SETTINGS_CM} fehlt"; exit 1; }
+  CLUSTER_CIDR="$(grep -E '^  CLUSTER_CIDR:' "${SETTINGS_CM}" | awk '{print $2}' | tr -d '"')"
+  [[ -n "${CLUSTER_CIDR}" ]] || { echo "Fehler: CLUSTER_CIDR fehlt in ${SETTINGS_CM}"; exit 1; }
+
+  # Bootstrap-Ausnahme (wie der Cilium-Install selbst): die Gateway-API-CRDs
+  # müssen VOR dem imperativen Install existieren (gatewayAPI.enabled=true –
+  # der Operator startet sonst nicht), Flux läuft aber erst nach cilium-up.
+  # Flux adoptiert die CRDs anschließend über die Kustomization
+  # "gateway-api-crds" (clusters/pi/gateway-api-crds-sync.yaml).
+  kubectl apply -k "${REPO_ROOT}/clusters/base/gateway-api-crds"
+  kubectl wait --for=condition=Established --timeout=60s \
+    crd/gatewayclasses.gateway.networking.k8s.io \
+    crd/gateways.gateway.networking.k8s.io \
+    crd/httproutes.gateway.networking.k8s.io \
+    crd/grpcroutes.gateway.networking.k8s.io \
+    crd/referencegrants.gateway.networking.k8s.io
+
+  EXTRA_ARGS+=(
+    --set ipv4.enabled=false
+    --set ipv6.enabled=true
+    --set routingMode=native
+    --set autoDirectNodeRoutes=true
+    --set ipv6NativeRoutingCIDR="${CLUSTER_CIDR}"
+    --set ipam.mode=kubernetes
+    --set gatewayAPI.enabled=true
+    --set envoy.enabled=true
+    --set externalIPs.enabled=true
+  )
 fi
 
 # helm status statt "cilium status" als Installiert-Check: Letzteres schlägt

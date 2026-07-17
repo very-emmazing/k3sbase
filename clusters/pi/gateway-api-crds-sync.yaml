@@ -1,0 +1,22 @@
+# Gateway-API-CRDs müssen vor der Cilium-Reconciliation existieren
+# (gatewayAPI.enabled=true): die infrastructure-Kustomization hängt via
+# dependsOn hinter dieser hier. "wait: true" lässt Flux warten, bis alle
+# CRDs den Zustand Established erreicht haben (Health-Check auf jede
+# applizierte Ressource).
+# Beim Erst-Bootstrap appliziert "mise run cilium-up -- pi" dieselben CRDs
+# einmalig imperativ (Henne-Ei: Cilium läuft vor Flux); Flux adoptiert sie
+# anschließend über diese Kustomization.
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: gateway-api-crds
+  namespace: flux-system
+spec:
+  interval: 12h
+  path: ./clusters/base/gateway-api-crds
+  prune: true
+  wait: true
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+    namespace: flux-system

@@ -8,10 +8,17 @@ spec:
   url: https://helm.cilium.io/
 ---
 # Release name and namespace match the cilium-cli install so Flux can adopt it.
-# k8sServiceHost is set to the Pi server node IP by "mise run cluster-up -- pi";
-# it must match PI_SERVER in clusters/pi/nodes.env and be pushed to origin/main
-# before "mise run flux-bootstrap -- pi" (which verifies both).
+# k8sServiceHost is set to the Pi server node ULA by "mise run cluster-up -- pi";
+# it must match PI_SERVER_ULA in clusters/pi/nodes.env and be pushed to
+# origin/main before "mise run flux-bootstrap -- pi" (which verifies both).
 # operator.replicas: 2 for HA across the multi-node cluster.
+#
+# IPv6-only: Pod-/Service-Netz ist reines IPv6 (ULA, siehe
+# clusters/pi/cluster-settings.yaml). Die k3s-Seite (--cluster-cidr,
+# --service-cidr, --node-ip) setzt "mise run cluster-up -- pi" aus denselben
+# Quellen; die Werte hier müssen mit dem imperativen Bootstrap-Install in
+# .mise-tasks/cilium-up übereinstimmen, sonst ändert Flux bei der Adoption
+# die laufende CNI-Konfiguration.
 apiVersion: helm.toolkit.fluxcd.io/v2
 kind: HelmRelease
 metadata:
@@ -28,9 +35,42 @@ spec:
         name: cilium
         namespace: flux-system
   values:
+    ipv4:
+      enabled: false
+    ipv6:
+      enabled: true
+    # VXLAN/Geneve setzen in Cilium 1.16 einen IPv4-Underlay voraus
+    # (cilium/cilium#17240) – IPv6-only erzwingt daher Native Routing.
+    # Alle Nodes hängen am selben L2-Segment, autoDirectNodeRoutes
+    # installiert die PodCIDR-Routen der Nachbar-Nodes direkt.
+    routingMode: native
+    autoDirectNodeRoutes: true
+    ipv6NativeRoutingCIDR: "${CLUSTER_CIDR}"
+    # PodCIDRs kommen aus k3s (--cluster-cidr, per-Node-Zuteilung durch den
+    # kube-controller-manager) statt aus Ciliums cluster-pool – eine einzige
+    # Quelle für k3s und CNI.
+    ipam:
+      mode: kubernetes
     kubeProxyReplacement: true
-    k8sServiceHost: "REPLACE_WITH_PI_SERVER_IP"
+    k8sServiceHost: "REPLACE_WITH_PI_SERVER_ULA"
     k8sServicePort: "6443"
+    # Cilium-eigener Gateway-API-Controller; CRDs kommen aus der Flux-
+    # Kustomization "gateway-api-crds" (dependsOn in infrastructure-sync.yaml).
+    gatewayAPI:
+      enabled: true
+    # Dedizierte Envoy-DaemonSet als L7-Proxy für das Gateway.
+    envoy:
+      enabled: true
+    # eBPF-Forwarding für Service-externalIPs/LoadBalancer-IPs: Traffic, der
+    # an einem Node für die statische Gateway-ULA ankommt, wird an die
+    # Backends weitergeleitet (LAN-Zugriffspfad, siehe README).
+    externalIPs:
+      enabled: true
+    # l2announcements bewusst NICHT aktiviert: Cilium hat seit 1.19 zwar
+    # IPv6/NDP-Support für L2-Announcements, aber Stand heute offene Bugs
+    # beim Multicast-Group-Join für LoadBalancer-IPs. Wird hier auch nicht
+    # gebraucht – die Gateway-ULA ist statisch auf den Node-Interfaces
+    # konfiguriert (siehe README), es gibt nichts dynamisch zu announcen.
     # Ohne dies mountet Cilium eine eigene, isolierte cgroupv2-Instanz statt
     # die vorhandene unter /sys/fs/cgroup zu nutzen – Socket-LB (ClusterIP-
     # Routing für reguläre Pods wie coredns/metrics-server) greift dann nie.

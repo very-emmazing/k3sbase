@@ -12,7 +12,7 @@ case "${CLUSTER}" in
   *) printf "Unbekannter Cluster '%s'. Erlaubt: local | pi\n" "${CLUSTER}" >&2; exit 1 ;;
 esac
 
-TOTAL=3; [[ "${CLUSTER}" == "pi" ]] && TOTAL=4
+TOTAL=3; [[ "${CLUSTER}" == "pi" ]] && TOTAL=5
 STEP=0
 
 if [[ -t 1 ]]; then
@@ -80,15 +80,19 @@ if [[ "${CLUSTER}" == "pi" ]]; then
   _nodes_ok() {
     # shellcheck source=/dev/null
     source "${NODES_ENV}" 2>/dev/null || return 1
-    [[ -n "${PI_SERVER:-}" && -n "${PI_AGENT_0:-}" && -n "${PI_AGENT_1:-}" && -n "${PI_AGENT_2:-}" ]]
+    [[ -n "${PI_SERVER:-}" && -n "${PI_AGENT_0:-}" && -n "${PI_AGENT_1:-}" && -n "${PI_AGENT_2:-}" ]] || return 1
+    [[ -n "${PI_SERVER_ULA:-}" && -n "${PI_AGENT_0_ULA:-}" && -n "${PI_AGENT_1_ULA:-}" && -n "${PI_AGENT_2_ULA:-}" ]]
   }
 
   if _nodes_ok; then
     # _nodes_ok läuft in dieser Shell (Funktion, keine Subshell) – die Variablen
     # aus nodes.env sind hier bereits gesetzt.
     ok "Bereits konfiguriert: server=${PI_SERVER}  agents=${PI_AGENT_0} ${PI_AGENT_1} ${PI_AGENT_2}"
+    ok "ULAs: server=${PI_SERVER_ULA}  agents=${PI_AGENT_0_ULA} ${PI_AGENT_1_ULA} ${PI_AGENT_2_ULA}"
   else
     hint "Voraussetzung: Ubuntu auf allen Nodes, SSH-Pubkey bereits hinterlegt"
+    hint "IPv6-only-Cluster: pro Node zusätzlich die statische ULA (k3s --node-ip);"
+    hint "die ULA muss bereits auf dem Node-Interface konfiguriert sein (siehe README)"
     echo
     read -r -p "  SSH-User    [ubuntu]: " INPUT_USER
     PI_USER="${INPUT_USER:-ubuntu}"
@@ -96,8 +100,14 @@ if [[ "${CLUSTER}" == "pi" ]]; then
     read -r -p "  Agent-IP 1   (1x): "   PI_AGENT_0
     read -r -p "  Agent-IP 2   (2x): "   PI_AGENT_1
     read -r -p "  Agent-IP 3   (3x): "   PI_AGENT_2
+    read -r -p "  Server-ULA   (1x): "   PI_SERVER_ULA
+    read -r -p "  Agent-ULA 1  (1x): "   PI_AGENT_0_ULA
+    read -r -p "  Agent-ULA 2  (2x): "   PI_AGENT_1_ULA
+    read -r -p "  Agent-ULA 3  (3x): "   PI_AGENT_2_ULA
     [[ -z "${PI_SERVER}" ]] && die "Server-IP darf nicht leer sein"
-    for v in PI_AGENT_0 PI_AGENT_1 PI_AGENT_2; do [[ -z "${!v}" ]] && die "${v} darf nicht leer sein"; done
+    for v in PI_AGENT_0 PI_AGENT_1 PI_AGENT_2 PI_SERVER_ULA PI_AGENT_0_ULA PI_AGENT_1_ULA PI_AGENT_2_ULA; do
+      [[ -z "${!v}" ]] && die "${v} darf nicht leer sein"
+    done
     cat > "${NODES_ENV}" <<ENV
 # Pi-Cluster Node-Konfiguration – generiert von: mise run setup -- pi
 PI_USER="${PI_USER}"
@@ -105,33 +115,83 @@ PI_SERVER="${PI_SERVER}"
 PI_AGENT_0="${PI_AGENT_0}"
 PI_AGENT_1="${PI_AGENT_1}"
 PI_AGENT_2="${PI_AGENT_2}"
+PI_SERVER_ULA="${PI_SERVER_ULA}"
+PI_AGENT_0_ULA="${PI_AGENT_0_ULA}"
+PI_AGENT_1_ULA="${PI_AGENT_1_ULA}"
+PI_AGENT_2_ULA="${PI_AGENT_2_ULA}"
 ENV
     ok "nodes.env gesetzt"
     NODES_ENV_UPDATED=true
   fi
 fi
 
-# ── [3/4] Cloudflare API Token ────────────────────────────────────────────────
-CF_SECRET="clusters/${CLUSTER}/infrastructure/external-dns-secret.yaml"
-CF_SECRET_UPDATED=false
+# ── [4] Cluster-Settings (nur pi) ─────────────────────────────────────────────
+SETTINGS_UPDATED=false
+if [[ "${CLUSTER}" == "pi" ]]; then
+  step "Cluster-Settings (clusters/pi/cluster-settings.yaml)"
+  SETTINGS_YAML="${REPO_ROOT}/clusters/pi/cluster-settings.yaml"
+  [[ -f "${SETTINGS_YAML}" ]] || die "${SETTINGS_YAML} fehlt"
 
-step "Cloudflare API Token (external-dns)"
+  _get_setting() { grep -E "^  $1:" "${SETTINGS_YAML}" | awk '{print $2}' | tr -d '"'; }
+  _set_setting() {
+    local tmp; tmp="$(mktemp)"
+    sed "s|^  $1: \".*\"|  $1: \"$2\"|" "${SETTINGS_YAML}" > "${tmp}" && mv "${tmp}" "${SETTINGS_YAML}"
+  }
 
-if grep -q 'ENC\[' "${REPO_ROOT}/${CF_SECRET}" 2>/dev/null; then
-  ok "Bereits SOPS-verschlüsselt – übersprungen"
-else
-  EXISTING="$(grep 'token:' "${REPO_ROOT}/${CF_SECRET}" | awk '{print $2}' | tr -d '"' | xargs 2>/dev/null || true)"
-  if [[ -z "${EXISTING}" ]]; then
-    hint "Token erstellen unter: https://dash.cloudflare.com/profile/api-tokens"
-    hint "  → \"Create Token\" → Template \"Edit zone DNS\""
-    hint "  Berechtigungen: Zone:DNS:Edit  (Zone:Zone:Read optional für Autodiscovery)"
-    echo
-    read -r -s -p "  Token (Eingabe unsichtbar): " CF_TOKEN
-    echo
-    [[ -z "${CF_TOKEN}" ]] && die "Kein Token eingegeben"
-  else
-    warn "Plaintext-Token gefunden – wird direkt verschlüsselt"
-    CF_TOKEN="${EXISTING}"
+  # CLUSTER_CIDR/SERVICE_CIDR haben Defaults und werden nicht abgefragt.
+  for pair in \
+    "PI_DOMAIN|Basis-Domain (z.B. example.org)" \
+    "GATEWAY_ULA|Gateway-ULA, ohne Präfixlänge (z.B. fd00:44::1)" \
+    "TUNNEL_ID|Cloudflare-Tunnel-ID (leer = später nachtragen)" \
+    "ACME_EMAIL|E-Mail für Let's Encrypt (ClusterIssuer)"; do
+    key="${pair%%|*}"; prompt="${pair#*|}"
+    cur="$(_get_setting "${key}")"
+    if [[ -n "${cur}" && "${cur}" != REPLACE_WITH_* ]]; then
+      ok "${key} bereits gesetzt: ${cur}"
+      continue
+    fi
+    read -r -p "  ${prompt}: " val
+    if [[ -z "${val}" ]]; then
+      warn "${key} bleibt Platzhalter – flux-bootstrap verweigert, bis der Wert gesetzt ist"
+      continue
+    fi
+    _set_setting "${key}" "${val}"
+    ok "${key} gesetzt"
+    SETTINGS_UPDATED=true
+  done
+fi
+
+# ── [3/5] Cloudflare API Token ────────────────────────────────────────────────
+# pi: derselbe Token wird zusätzlich für den cert-manager-Namespace
+# verschlüsselt (ClusterIssuer-secretRefs werden nur dort aufgelöst).
+CF_SECRET_FILES=("clusters/${CLUSTER}/infrastructure/external-dns-secret.yaml|external-dns")
+[[ "${CLUSTER}" == "pi" ]] \
+  && CF_SECRET_FILES+=("clusters/pi/infrastructure/cert-manager-secret.yaml|cert-manager")
+CF_SECRETS_UPDATED=()
+CF_TOKEN=""
+
+step "Cloudflare API Token (external-dns / cert-manager)"
+
+for entry in "${CF_SECRET_FILES[@]}"; do
+  CF_SECRET="${entry%%|*}"; CF_NAMESPACE="${entry#*|}"
+  if grep -q 'ENC\[' "${REPO_ROOT}/${CF_SECRET}" 2>/dev/null; then
+    ok "Bereits SOPS-verschlüsselt – übersprungen: ${CF_SECRET}"
+    continue
+  fi
+  if [[ -z "${CF_TOKEN}" ]]; then
+    EXISTING="$(grep 'token:' "${REPO_ROOT}/${CF_SECRET}" | awk '{print $2}' | tr -d '"' | xargs 2>/dev/null || true)"
+    if [[ -n "${EXISTING}" ]]; then
+      warn "Plaintext-Token gefunden – wird direkt verschlüsselt"
+      CF_TOKEN="${EXISTING}"
+    else
+      hint "Token erstellen unter: https://dash.cloudflare.com/profile/api-tokens"
+      hint "  → \"Create Token\" → Template \"Edit zone DNS\""
+      hint "  Berechtigungen: Zone:DNS:Edit  (Zone:Zone:Read optional für Autodiscovery)"
+      echo
+      read -r -s -p "  Token (Eingabe unsichtbar): " CF_TOKEN
+      echo
+      [[ -z "${CF_TOKEN}" ]] && die "Kein Token eingegeben"
+    fi
   fi
   # Plaintext nie in die getrackte Datei schreiben: schlüge sops fehl, läge der
   # Token sonst unverschlüsselt im Repo (ein "git add ." vom Leak entfernt).
@@ -144,7 +204,7 @@ apiVersion: v1
 kind: Secret
 metadata:
   name: cloudflare-api-token
-  namespace: external-dns
+  namespace: ${CF_NAMESPACE}
 stringData:
   token: "${CF_TOKEN}"
 YAML
@@ -153,8 +213,8 @@ YAML
   mv "${TMP_SECRET}.enc" "${REPO_ROOT}/${CF_SECRET}"
   rm -f "${TMP_SECRET}"
   ok "Verschlüsselt: ${CF_SECRET}"
-  CF_SECRET_UPDATED=true
-fi
+  CF_SECRETS_UPDATED+=("${CF_SECRET}")
+done
 
 # ── Commits ───────────────────────────────────────────────────────────────────
 _commit() {
@@ -167,7 +227,8 @@ _commit() {
 HAS_CHANGES=false
 [[ "${SOPS_YAML_UPDATED}" == true ]] && HAS_CHANGES=true
 [[ "${NODES_ENV_UPDATED}" == true ]] && HAS_CHANGES=true
-[[ "${CF_SECRET_UPDATED}" == true ]] && HAS_CHANGES=true
+[[ "${SETTINGS_UPDATED}" == true ]] && HAS_CHANGES=true
+[[ ${#CF_SECRETS_UPDATED[@]} -gt 0 ]] && HAS_CHANGES=true
 
 if [[ "${HAS_CHANGES}" == true ]]; then
   printf "\n"
@@ -175,12 +236,14 @@ if [[ "${HAS_CHANGES}" == true ]]; then
   if [[ "${REPLY}" =~ ^[jJ]$ ]]; then
     [[ "${SOPS_YAML_UPDATED}" == true ]] && _commit "chore(sops): set age recipient"                  .sops.yaml
     [[ "${NODES_ENV_UPDATED}" == true ]] && _commit "chore(pi): set node ips in nodes.env"            clusters/pi/nodes.env
-    [[ "${CF_SECRET_UPDATED}" == true ]] && _commit "feat(${CLUSTER}): add sops-encrypted cloudflare api token" "${CF_SECRET}"
+    [[ "${SETTINGS_UPDATED}" == true ]]  && _commit "chore(pi): set cluster settings"                 clusters/pi/cluster-settings.yaml
+    [[ ${#CF_SECRETS_UPDATED[@]} -gt 0 ]] && _commit "feat(${CLUSTER}): add sops-encrypted cloudflare api token" "${CF_SECRETS_UPDATED[@]}"
   else
     printf "\n"; hint "Manuell committen:"
     [[ "${SOPS_YAML_UPDATED}" == true ]] && hint "  git add .sops.yaml && git commit -m 'chore(sops): set age recipient'"
     [[ "${NODES_ENV_UPDATED}" == true ]] && hint "  git add clusters/pi/nodes.env && git commit -m 'chore(pi): set node ips in nodes.env'"
-    [[ "${CF_SECRET_UPDATED}" == true ]] && hint "  git add ${CF_SECRET} && git commit -m 'feat(${CLUSTER}): add sops-encrypted cloudflare api token'"
+    [[ "${SETTINGS_UPDATED}" == true ]]  && hint "  git add clusters/pi/cluster-settings.yaml && git commit -m 'chore(pi): set cluster settings'"
+    [[ ${#CF_SECRETS_UPDATED[@]} -gt 0 ]] && hint "  git add ${CF_SECRETS_UPDATED[*]} && git commit -m 'feat(${CLUSTER}): add sops-encrypted cloudflare api token'"
   fi
 fi
 

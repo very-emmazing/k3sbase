@@ -1,0 +1,28 @@
+# Cluster-spezifische Einstellungen für den Pi-Cluster (Muster wie
+# cluster-versions.yaml): via Flux postBuild-Substitution in die Manifeste
+# injiziert; mise-Tasks (cluster-up, cilium-up) lesen die CIDRs für die
+# k3s-/Cilium-Bootstrap-Argumente aus dieser Datei.
+# "mise run setup -- pi" fragt die REPLACE_WITH_-Werte interaktiv ab und
+# patcht sie hier ein.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cluster-settings
+  namespace: flux-system
+data:
+  # IPv6-ULA-Bereiche (RFC 4193) für Pods und Services. Werden von
+  # "mise run cluster-up -- pi" als k3s --cluster-cidr/--service-cidr gesetzt
+  # und von Cilium als ipv6NativeRoutingCIDR übernommen. Nachträgliche
+  # Änderung erfordert einen Cluster-Neuaufbau.
+  CLUSTER_CIDR: "fd00:42::/56"
+  SERVICE_CIDR: "fd00:43::/112"
+  # Statische ULA des Gateway-Service (LAN-Zugriffspfad). Muss außerhalb von
+  # CLUSTER_CIDR/SERVICE_CIDR liegen und wird zusätzlich fest auf den
+  # Node-Interfaces konfiguriert (außerhalb des Repos, siehe README).
+  GATEWAY_ULA: "REPLACE_WITH_GATEWAY_ULA"
+  # Basis-Domain für Gateway-Hostnames (z.B. example.org → echo-a.example.org).
+  PI_DOMAIN: "REPLACE_WITH_DOMAIN"
+  # Cloudflare-Tunnel-ID (UUID aus "cloudflared tunnel create <name>").
+  TUNNEL_ID: "REPLACE_WITH_TUNNEL_ID"
+  # Kontakt-E-Mail für den Let's-Encrypt-Account (ClusterIssuer).
+  ACME_EMAIL: "REPLACE_WITH_ACME_EMAIL"

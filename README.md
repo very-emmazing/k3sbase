@@ -1,6 +1,9 @@
 # k3sbase
 
-GitOps-verwalteter k3d-Cluster mit Flux Operator, Cilium, cert-manager und external-dns/Cloudflare.
+GitOps-verwalteter k3s-/k3d-Cluster mit Flux Operator, Cilium, cert-manager und external-dns/Cloudflare.
+Der Pi-Cluster läuft IPv6-only mit Cilium Gateway API und Split-Horizon-Zugriff
+(extern via Cloudflare Tunnel, intern via statischer IPv6-ULA) – siehe
+[Pi-Cluster: IPv6-only, Gateway & Split-Horizon](#pi-cluster-ipv6-only-gateway--split-horizon).
 
 ## Voraussetzungen
 
@@ -32,14 +35,19 @@ aktualisiert hat: **committen und pushen**, bevor `flux-bootstrap` läuft –
 Flux reconciliert `origin/main`, nicht den lokalen Checkout
 (`flux-bootstrap` prüft das).
 
-### Pi-Cluster (1 Server + 3 Agents)
+### Pi-Cluster (1 Server + 3 Agents, IPv6-only)
+
+Voraussetzung: `mise run setup -- pi` hat Node-IPs **und** Node-ULAs
+(nodes.env) sowie Domain/Gateway-ULA/Tunnel-ID/ACME-E-Mail
+(clusters/pi/cluster-settings.yaml) gesetzt; die ULAs sind auf den
+Node-Interfaces konfiguriert (manuell, siehe unten).
 
 ```bash
-mise run cluster-up  -- pi   # Chrony + k3s via SSH; patcht clusters/pi/infrastructure/cilium.yaml
-git add clusters/pi/infrastructure/cilium.yaml
+mise run cluster-up  -- pi   # Chrony + k3s (IPv6-only) via SSH; patcht clusters/pi/infrastructure/cilium.yaml
+git add clusters/pi/infrastructure/cilium.yaml clusters/pi/cluster-settings.yaml
 git commit -m "chore(pi): set cilium api server host"
 git push
-mise run cilium-up    -- pi
+mise run cilium-up    -- pi  # appliziert auch die Gateway-API-CRDs (Bootstrap-Ausnahme)
 mise run flux-bootstrap -- pi
 ```
 
@@ -61,6 +69,71 @@ Auf neue Maschinen den vorhandenen Key kopieren – ein neu generierter Key kann
 bestehende Secrets nicht entschlüsseln. `mise run setup` ersetzt bei abweichendem
 Key den Recipient in `.sops.yaml` und warnt, dass alle Secrets neu verschlüsselt
 werden müssen.
+
+## Pi-Cluster: IPv6-only, Gateway & Split-Horizon
+
+Der Pi-Cluster fährt ein reines IPv6-Pod-/Service-Netz (ULA, RFC 4193):
+`CLUSTER_CIDR`/`SERVICE_CIDR` in `clusters/pi/cluster-settings.yaml` werden
+von `cluster-up` als k3s-Args (`--cluster-cidr`, `--service-cidr`,
+`--node-ip`) und von Cilium (`ipv6NativeRoutingCIDR`, Native Routing statt
+VXLAN – Tunnel-Modus braucht in Cilium 1.16 einen IPv4-Underlay) benutzt.
+
+Derselbe Hostname ist über **zwei Pfade** erreichbar (Split-Horizon), damit
+große Uploads (z.B. Nextcloud) nicht über den Tunnel-Umweg laufen müssen:
+
+1. **Extern:** Cloudflare Tunnel (`cloudflared`-Deployment) → Cilium-Gateway-
+   Service (`ClusterIP:443`, HTTPS, TLS-verifiziert gegen das cert-manager-
+   Zertifikat).
+2. **Intern/LAN:** dieselben Hostnames zeigen im LAN-DNS auf die statische
+   `GATEWAY_ULA`, die per Cilium LB-IPAM fest an den Gateway-Service gebunden
+   ist (Single-IP-Pool + `lbipam.cilium.io/ips`; kein L2-Announcement –
+   `Gateway.spec.addresses`/`spec.externalIPs` sind auf dem von Cilium
+   generierten Service nicht setzbar, LB-IPAM-Pinning ist der unterstützte
+   Weg und verhält sich im Datapath identisch zu `externalIPs`).
+
+### Einrichtung (einmalig)
+
+```bash
+cloudflared tunnel login          # Cloudflare-Konto autorisieren (lokal)
+cloudflared tunnel create pi      # schreibt ~/.cloudflared/<TUNNEL_ID>.json
+mise run setup -- pi              # fragt u.a. TUNNEL_ID, Domain, Gateway-ULA ab
+# Tunnel-Credentials verschlüsseln:
+#   JSON-Inhalt in clusters/pi/infrastructure/cloudflared-credentials-secret.yaml
+#   als credentials.json-Wert eintragen, dann:
+sops -e -i clusters/pi/infrastructure/cloudflared-credentials-secret.yaml
+git add -A && git commit -m "feat(pi): add cloudflared tunnel credentials" && git push
+```
+
+**Was Flux übernimmt:**
+
+- Gateway-API-CRDs (`gateway-api-crds`-Kustomization, vor Cilium via `dependsOn`)
+- Cilium (IPv6-only, Gateway API, Envoy), cert-manager, external-dns, cloudflared
+- ClusterIssuer (Let's Encrypt, **DNS-01 via Cloudflare** – HTTP-01 ist ohne
+  öffentlich erreichbaren Pfad nicht möglich) + Wildcard-Zertifikat
+- **Externer DNS-Eintrag:** external-dns legt den CNAME
+  `<hostname> → <TUNNEL_ID>.cfargotunnel.com` (proxied) selbst an – über den
+  ExternalName-Service `cloudflared-tunnel-cname` mit
+  `external-dns.alpha.kubernetes.io/hostname`-Annotation. Ein manueller
+  Cloudflare-Eintrag bzw. `cloudflared tunnel route dns` entfällt.
+
+**Was manuell bleibt (außerhalb des Repos):**
+
+- **Node-ULAs** (`nodes.env`: `PI_*_ULA`) als statische Adressen auf den
+  Node-Interfaces konfigurieren (z.B. netplan), **bevor** `cluster-up` läuft.
+- **Gateway-ULA** (`GATEWAY_ULA`) zusätzlich auf **einem** Node-Interface
+  konfigurieren (nur einem – sonst schlägt IPv6 Duplicate Address Detection
+  zu). Der Node beantwortet dann NDP für die ULA; Cilium-eBPF leitet
+  ankommenden Traffic an die Gateway-Backends weiter.
+- **Interner DNS** (z.B. Fritzbox/Pi-hole): `echo-a.<domain>` und
+  `echo-b.<domain>` auf die `GATEWAY_ULA` auflösen lassen. Ohne internen
+  DNS-Override geht der LAN-Traffic den externen Weg über den Tunnel.
+- **IPv6-Egress:** die Nodes brauchen ausgehendes IPv6 (GUA vom Router) –
+  cloudflared (`edge-ip-version: 6`) und Let's Encrypt/Cloudflare-API werden
+  aus dem IPv6-only-Pod-Netz heraus erreicht (Cilium masqueradet auf die
+  Node-Adresse).
+
+Der Echo-Beispiel-Workload (`clusters/pi/apps/echo.yaml`) testet die ganze
+Kette über beide Pfade – Testfälle in [TESTPLAN.md](TESTPLAN.md).
 
 ## Lokale Validierung mit flux-local
 

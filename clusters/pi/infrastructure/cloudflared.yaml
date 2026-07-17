@@ -1,0 +1,109 @@
+# Cloudflare Tunnel (cloudflared) – EXTERNER Zugriffspfad (Split-Horizon).
+# Der Tunnel terminiert eingehende Requests an der Cloudflare-Edge und
+# leitet sie an den Cilium-Gateway-Service weiter (HTTPS, TLS-verifiziert
+# gegen das cert-manager-Zertifikat). Der INTERNE Pfad (LAN → Gateway-ULA)
+# läuft am Tunnel vorbei, siehe README.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: cloudflared
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cloudflared-config
+  namespace: cloudflared
+data:
+  config.yaml: |
+    tunnel: "${TUNNEL_ID}"
+    credentials-file: /etc/cloudflared/creds/credentials.json
+    # IPv6-only-Cluster: Pods haben keine IPv4-Route – die Edge-Verbindung
+    # muss über IPv6 aufgebaut werden.
+    edge-ip-version: "6"
+    metrics: "[::]:2000"
+    no-autoupdate: true
+    ingress:
+      # Pro Hostname eine Regel, damit originServerName (SNI für die
+      # TLS-Verifikation gegen das Wildcard-Zertifikat des Gateways) zum
+      # angefragten Host passt.
+      - hostname: "echo-a.${PI_DOMAIN}"
+        service: https://cilium-gateway-web-gateway.echo.svc.cluster.local:443
+        originRequest:
+          originServerName: "echo-a.${PI_DOMAIN}"
+          # Nur zum Debuggen der Routing-Kette ohne gültiges Zertifikat –
+          # niemals dauerhaft aktivieren:
+          # noTLSVerify: true
+      - hostname: "echo-b.${PI_DOMAIN}"
+        service: https://cilium-gateway-web-gateway.echo.svc.cluster.local:443
+        originRequest:
+          originServerName: "echo-b.${PI_DOMAIN}"
+          # noTLSVerify: true
+      - service: http_status:404
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cloudflared
+  namespace: cloudflared
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: cloudflared
+  template:
+    metadata:
+      labels:
+        app: cloudflared
+    spec:
+      containers:
+        - name: cloudflared
+          image: "cloudflare/cloudflared:${CLOUDFLARED_VERSION}"
+          args:
+            - tunnel
+            - --config
+            - /etc/cloudflared/config/config.yaml
+            - run
+          livenessProbe:
+            httpGet:
+              path: /ready
+              port: 2000
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          resources:
+            requests:
+              cpu: 10m
+              memory: 64Mi
+            limits:
+              memory: 128Mi
+          volumeMounts:
+            - name: config
+              mountPath: /etc/cloudflared/config
+              readOnly: true
+            - name: creds
+              mountPath: /etc/cloudflared/creds
+              readOnly: true
+      volumes:
+        - name: config
+          configMap:
+            name: cloudflared-config
+        - name: creds
+          secret:
+            secretName: cloudflared-credentials
+---
+# CNAME-Automatisierung für den Tunnel-Hostnamen: external-dns (Source
+# "service") legt für ExternalName-Services mit hostname-Annotation
+# CNAME-Records auf den externalName an. cloudflare-proxied ist Pflicht –
+# ein CNAME auf <tunnel-id>.cfargotunnel.com funktioniert nur proxied
+# (orange cloud). Damit entfällt der manuelle Cloudflare-DNS-Eintrag bzw.
+# "cloudflared tunnel route dns".
+apiVersion: v1
+kind: Service
+metadata:
+  name: cloudflared-tunnel-cname
+  namespace: cloudflared
+  annotations:
+    external-dns.alpha.kubernetes.io/hostname: "echo-a.${PI_DOMAIN},echo-b.${PI_DOMAIN}"
+    external-dns.alpha.kubernetes.io/cloudflare-proxied: "true"
+spec:
+  type: ExternalName
+  externalName: "${TUNNEL_ID}.cfargotunnel.com"
