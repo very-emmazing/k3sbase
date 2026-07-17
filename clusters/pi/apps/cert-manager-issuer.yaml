@@ -1,0 +1,34 @@
+# ClusterIssuer für Let's Encrypt via DNS-01/Cloudflare.
+#
+# DNS-01 statt HTTP-01: das Gateway ist von außen nur über den Cloudflare-
+# Tunnel bzw. im LAN über die ULA erreichbar – ein HTTP-01-Challenge-Pfad
+# existiert nicht öffentlich. DNS-01 nutzt den ohnehin vorhandenen
+# Cloudflare-API-Token (Kopie im cert-manager-Namespace, siehe
+# clusters/pi/infrastructure/cert-manager-secret.yaml) und erlaubt
+# Wildcard-Zertifikate.
+#
+# Liegt bewusst in apps/ statt infrastructure/: kustomize-controller kann
+# CRs unbekannter Kinds nicht applien – läge der ClusterIssuer neben der
+# cert-manager-HelmRelease, würde die infrastructure-Kustomization beim
+# Erst-Bootstrap deadlocken (CRDs existieren erst nach dem Helm-Install).
+# apps hängt via dependsOn + healthChecks hinter infrastructure.
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt
+spec:
+  acme:
+    email: "${ACME_EMAIL}"
+    server: https://acme-v02.api.letsencrypt.org/directory
+    # Zum Testen gegen das Staging-Environment tauschen (höhere Rate-Limits,
+    # aber nicht öffentlich vertrauenswürdig – cloudflared-TLS-Verifikation
+    # schlägt dann fehl):
+    # server: https://acme-staging-v02.api.letsencrypt.org/directory
+    privateKeySecretRef:
+      name: letsencrypt-account-key
+    solvers:
+      - dns01:
+          cloudflare:
+            apiTokenSecretRef:
+              name: cloudflare-api-token
+              key: token

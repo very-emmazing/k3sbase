@@ -6,3 +6,4 @@ resources:
 - cluster-settings.yaml
 - gateway-api-crds-sync.yaml
 - infrastructure-sync.yaml
+- apps-sync.yaml
