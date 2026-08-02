@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+#MISE description="Frische Pi-Nodes via Ansible konvergieren: SSH-Härtung + sudo + statische ULA"
+set -euo pipefail
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+NODES_ENV="${REPO_ROOT}/clusters/pi/nodes.env"
+SETTINGS_YAML="${REPO_ROOT}/clusters/pi/cluster-settings.yaml"
+# shellcheck source=lib/ssh-agent-key.sh
+source "${REPO_ROOT}/.mise-tasks/lib/ssh-agent-key.sh"
+
+[[ -f "${NODES_ENV}" ]] || { echo "Fehler: ${NODES_ENV} fehlt – zuerst: mise run setup -- pi"; exit 1; }
+
+PUBKEY="$(ssh_agent_pubkey)"
+
+# shellcheck source=/dev/null
+source "${NODES_ENV}"
+for var in PI_USER PI_SERVER PI_AGENT_0 PI_AGENT_1 PI_AGENT_2 \
+           PI_SERVER_ULA PI_AGENT_0_ULA PI_AGENT_1_ULA PI_AGENT_2_ULA; do
+  [[ -z "${!var:-}" ]] && { echo "Fehler: ${var} ist leer in ${NODES_ENV} – zuerst: mise run setup -- pi"; exit 1; }
+done
+
+# Gateway-ULA (geteilte Adresse für den Cilium-Gateway-Service) kommt auf
+# genau einen Node – Konvention: den Server. Optional: fehlt sie (noch
+# Platzhalter), wird nur die Per-Node-ULA gesetzt, kein Fehler.
+GATEWAY_ULA=""
+if [[ -f "${SETTINGS_YAML}" ]]; then
+  GATEWAY_ULA="$(grep -E '^  GATEWAY_ULA:' "${SETTINGS_YAML}" | awk '{print $2}' | tr -d '"')"
+  [[ "${GATEWAY_ULA}" == REPLACE_WITH_* ]] && GATEWAY_ULA=""
+fi
+SERVER_HOSTVARS="ansible_host=${PI_SERVER} node_ula=${PI_SERVER_ULA}"
+if [[ -n "${GATEWAY_ULA}" ]]; then
+  SERVER_HOSTVARS+=" gateway_ula=${GATEWAY_ULA}"
+else
+  echo "Hinweis: GATEWAY_ULA nicht gesetzt (${SETTINGS_YAML}) – nur Per-Node-ULA wird konfiguriert"
+fi
+
+INVENTORY="$(mktemp)"
+trap 'rm -f "${INVENTORY}"' EXIT
+
+cat > "${INVENTORY}" <<EOF
+[pi_server]
+${PI_SERVER} ${SERVER_HOSTVARS}
+
+[pi_agents]
+${PI_AGENT_0} ansible_host=${PI_AGENT_0} node_ula=${PI_AGENT_0_ULA}
+${PI_AGENT_1} ansible_host=${PI_AGENT_1} node_ula=${PI_AGENT_1_ULA}
+${PI_AGENT_2} ansible_host=${PI_AGENT_2} node_ula=${PI_AGENT_2_ULA}
+
+[pi_nodes:children]
+pi_server
+pi_agents
+
+[pi_nodes:vars]
+ansible_user=${PI_USER}
+EOF
+
+cd "${REPO_ROOT}/ansible"
+ansible-playbook -i "${INVENTORY}" playbooks/provision-nodes.yml \
+  -e "ssh_pubkey=${PUBKEY}"
+
+printf "\nWeiter mit:\n  mise run cluster-up -- pi\n"

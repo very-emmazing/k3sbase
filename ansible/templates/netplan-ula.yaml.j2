@@ -1,0 +1,9 @@
+network:
+  version: 2
+  ethernets:
+    {{ network_interface }}:
+      addresses:
+        - {{ node_ula }}/64
+{% if gateway_ula is defined %}
+        - {{ gateway_ula }}/64
+{% endif %}

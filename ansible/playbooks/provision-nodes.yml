@@ -1,0 +1,58 @@
+---
+# Konvergiert frisch geflashte Pi-Nodes auf den Zustand, den
+# "mise run cluster-up -- pi" erwartet: gehärteter SSH-Zugang
+# (Pubkey, passwordless sudo) + statische IPv6-ULA pro Node-Interface.
+# Der Server-Node bekommt zusätzlich die geteilte Gateway-ULA (hostvar
+# "gateway_ula", von .mise-tasks/pi-provision nur für pi_server gesetzt) –
+# absichtlich nur ein Node, sonst schlägt IPv6 Duplicate Address Detection zu.
+#
+# Voraussetzung: irgendein funktionierender SSH-Zugang zu jedem Node
+# existiert bereits (Cloud-Init-Default-User oder manuell über die
+# BMC-UART-Konsole eingerichtet). Ansible übernimmt ab hier, nicht die
+# Ersteinrichtung des allerersten Zugangs.
+# Siehe docs/how-to/turing-pi-2-fresh-setup.md.
+- name: Provision Turing Pi 2 nodes for k3sbase
+  hosts: pi_nodes
+  become: true
+  vars:
+    network_interface: eth0
+
+  tasks:
+    - name: SSH-Verzeichnis sicherstellen
+      ansible.builtin.file:
+        path: "/home/{{ ansible_user }}/.ssh"
+        state: directory
+        owner: "{{ ansible_user }}"
+        group: "{{ ansible_user }}"
+        mode: "0700"
+
+    - name: Public Key hinterlegen
+      ansible.builtin.lineinfile:
+        path: "/home/{{ ansible_user }}/.ssh/authorized_keys"
+        line: "{{ ssh_pubkey }}"
+        create: true
+        owner: "{{ ansible_user }}"
+        group: "{{ ansible_user }}"
+        mode: "0600"
+
+    - name: "Passwordless sudo für {{ ansible_user }}"
+      ansible.builtin.copy:
+        dest: "/etc/sudoers.d/90-{{ ansible_user }}-nopasswd"
+        content: "{{ ansible_user }} ALL=(ALL) NOPASSWD:ALL\n"
+        owner: root
+        group: root
+        mode: "0440"
+        validate: "visudo -cf %s"
+
+    - name: Statische IPv6-ULA rendern
+      ansible.builtin.template:
+        src: templates/netplan-ula.yaml.j2
+        dest: /etc/netplan/90-ula.yaml
+        owner: root
+        group: root
+        mode: "0600"
+      notify: netplan apply
+
+  handlers:
+    - name: netplan apply
+      ansible.builtin.command: netplan apply
