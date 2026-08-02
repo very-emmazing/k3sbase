@@ -1,0 +1,78 @@
+#!/usr/bin/env bash
+#MISE description="Alle vier Pi-Nodes über die BMC flashen, Cloud-Init-Pubkey aus ssh-agent"
+set -euo pipefail
+
+BMC_HOST="${1:?Fehler: BMC-Host angeben – z.B.: mise run pi-flash -- <bmc-ip> <pfad-zum-image>}"
+IMAGE="${2:?Fehler: Pfad zum Ubuntu-Server-Image (arm64, preinstalled-server) angeben}"
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+NODES_ENV="${REPO_ROOT}/clusters/pi/nodes.env"
+# shellcheck source=lib/ssh-agent-key.sh
+source "${REPO_ROOT}/.mise-tasks/lib/ssh-agent-key.sh"
+
+PI_USER="ubuntu"
+# nodes.env existiert zu diesem Zeitpunkt evtl. noch nicht (Flashen kommt vor
+# "mise run setup -- pi") – dann bleibt der Ubuntu-Default.
+# shellcheck source=/dev/null
+[[ -f "${NODES_ENV}" ]] && source "${NODES_ENV}"
+
+command -v tpi >/dev/null || { echo "Fehler: tpi nicht gefunden – zuerst: mise install"; exit 1; }
+[[ -f "${IMAGE}" ]] || { echo "Fehler: Image nicht gefunden: ${IMAGE}"; exit 1; }
+
+PUBKEY="$(ssh_agent_pubkey)"
+
+echo "Nodes: BMC=${BMC_HOST}  User=${PI_USER}"
+echo
+
+# Annahme: Ubuntu-"preinstalled-server"-Image – Partition 1 ("system-boot",
+# FAT) trägt cloud-init im NoCloud-Format (user-data-Datei im Root der
+# Partition). Anderes Image-Layout: Partitionsnummer unten anpassen.
+for slot in 1 2 3 4; do
+  echo "=== Slot ${slot} ==="
+
+  WORK_IMG="$(mktemp --suffix=.img)"
+  USERDATA="$(mktemp)"
+  MNT="$(mktemp -d)"
+  LOOPDEV=""
+  cleanup() {
+    [[ -n "${LOOPDEV}" ]] && sudo losetup -d "${LOOPDEV}" &>/dev/null || true
+    sudo umount "${MNT}" &>/dev/null || true
+    rmdir "${MNT}" &>/dev/null || true
+    rm -f "${WORK_IMG}" "${USERDATA}"
+  }
+  trap cleanup EXIT
+
+  cp --reflink=auto "${IMAGE}" "${WORK_IMG}"
+
+  cat > "${USERDATA}" <<CLOUDINIT
+#cloud-config
+hostname: pi-node-${slot}
+users:
+  - name: ${PI_USER}
+    groups: [sudo]
+    shell: /bin/bash
+    sudo: "ALL=(ALL) NOPASSWD:ALL"
+    lock_passwd: true
+    ssh_authorized_keys:
+      - ${PUBKEY}
+ssh_pwauth: false
+CLOUDINIT
+
+  LOOPDEV="$(sudo losetup --show -fP "${WORK_IMG}")"
+  sudo mount "${LOOPDEV}p1" "${MNT}"
+  sudo cp "${USERDATA}" "${MNT}/user-data"
+  sudo umount "${MNT}"
+  sudo losetup -d "${LOOPDEV}"
+  LOOPDEV=""
+
+  echo "  flashe …"
+  tpi --host "${BMC_HOST}" power off -n "${slot}"
+  tpi --host "${BMC_HOST}" flash -n "${slot}" -i "${WORK_IMG}"
+
+  cleanup
+  trap - EXIT
+  echo "  fertig"
+done
+
+printf "\nWeiter mit:\n"
+printf "  for n in 1 2 3 4; do tpi --host %s power on -n \"\${n}\"; done\n" "${BMC_HOST}"
