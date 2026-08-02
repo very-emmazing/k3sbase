@@ -37,10 +37,17 @@ Flux reconciliert `origin/main`, nicht den lokalen Checkout
 
 ### Pi-Cluster (1 Server + 3 Agents, IPv6-only)
 
+Board ohne OS (frische Compute-Module): siehe
+[docs/how-to/turing-pi-2-fresh-setup.md](docs/how-to/turing-pi-2-fresh-setup.md) –
+flasht alle vier Nodes inkl. Cloud-Init, findet ihre IPs automatisch,
+härtet SSH/sudo und setzt die statischen ULAs per Ansible. Endet bei genau
+diesem Punkt hier.
+
 Voraussetzung: `mise run setup -- pi` hat Node-IPs **und** Node-ULAs
 (nodes.env) sowie Domain/Gateway-ULA/Tunnel-ID/ACME-E-Mail
-(clusters/pi/cluster-settings.yaml) gesetzt; die ULAs sind auf den
-Node-Interfaces konfiguriert (manuell, siehe unten).
+(clusters/pi/cluster-settings.yaml) gesetzt; `mise run pi-provision` hat die
+ULAs (Per-Node + Gateway-ULA auf dem Server) auf den Node-Interfaces
+konfiguriert.
 
 ```bash
 mise run cluster-up  -- pi   # Chrony + k3s (IPv6-only) via SSH; patcht clusters/pi/infrastructure/cilium.yaml
@@ -94,14 +101,13 @@ große Uploads (z.B. Nextcloud) nicht über den Tunnel-Umweg laufen müssen:
 ### Einrichtung (einmalig)
 
 ```bash
-cloudflared tunnel login          # Cloudflare-Konto autorisieren (lokal)
+cloudflared tunnel login          # Cloudflare-Konto autorisieren (lokal, Browser-OAuth)
 cloudflared tunnel create pi      # schreibt ~/.cloudflared/<TUNNEL_ID>.json
-mise run setup -- pi              # fragt u.a. TUNNEL_ID, Domain, Gateway-ULA ab
-# Tunnel-Credentials verschlüsseln:
-#   JSON-Inhalt in clusters/pi/infrastructure/cloudflared-credentials-secret.yaml
-#   als credentials.json-Wert eintragen, dann:
-sops -e -i clusters/pi/infrastructure/cloudflared-credentials-secret.yaml
-git add -A && git commit -m "feat(pi): add cloudflared tunnel credentials" && git push
+mise run setup -- pi              # fragt TUNNEL_ID (aus der Ausgabe oben), Domain
+                                   # etc. ab, verschlüsselt anschließend
+                                   # ~/.cloudflared/<TUNNEL_ID>.json direkt in
+                                   # cloudflared-credentials-secret.yaml (SOPS)
+                                   # und bietet den Commit an
 ```
 
 **Was Flux übernimmt:**
@@ -116,14 +122,18 @@ git add -A && git commit -m "feat(pi): add cloudflared tunnel credentials" && gi
   `external-dns.alpha.kubernetes.io/hostname`-Annotation. Ein manueller
   Cloudflare-Eintrag bzw. `cloudflared tunnel route dns` entfällt.
 
+**Automatisiert (siehe [Turing-Pi-2-How-To](docs/how-to/turing-pi-2-fresh-setup.md)):**
+Node-ULAs und Gateway-ULA werden von `mise run pi-provision` (Ansible) als
+statische netplan-Adressen gesetzt – Gateway-ULA nur auf dem Server-Node
+(sonst schlägt IPv6 Duplicate Address Detection zu; der Node beantwortet
+dann NDP für die ULA, Cilium-eBPF leitet ankommenden Traffic an die
+Gateway-Backends weiter).
+
 **Was manuell bleibt (außerhalb des Repos):**
 
-- **Node-ULAs** (`nodes.env`: `PI_*_ULA`) als statische Adressen auf den
-  Node-Interfaces konfigurieren (z.B. netplan), **bevor** `cluster-up` läuft.
-- **Gateway-ULA** (`GATEWAY_ULA`) zusätzlich auf **einem** Node-Interface
-  konfigurieren (nur einem – sonst schlägt IPv6 Duplicate Address Detection
-  zu). Der Node beantwortet dann NDP für die ULA; Cilium-eBPF leitet
-  ankommenden Traffic an die Gateway-Backends weiter.
+- **Cloudflare Tunnel anlegen** (`cloudflared tunnel login` +
+  `tunnel create`) – Browser-OAuth, nicht scriptbar. Ab der geschriebenen
+  JSON-Datei übernimmt `mise run setup -- pi` (siehe oben).
 - **Interner DNS** (z.B. Fritzbox/Pi-hole): `echo-a.<domain>` und
   `echo-b.<domain>` auf die `GATEWAY_ULA` auflösen lassen. Ohne internen
   DNS-Override geht der LAN-Traffic den externen Weg über den Tunnel.
