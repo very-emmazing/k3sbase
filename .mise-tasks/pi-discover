@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+#MISE description="Pi-Node-IPs automatisch im lokalen Subnetz finden (Hostnamen pi-node-1..4) und in nodes.env schreiben"
+set -euo pipefail
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+NODES_ENV="${REPO_ROOT}/clusters/pi/nodes.env"
+# shellcheck source=lib/pi-discover.sh
+source "${REPO_ROOT}/.mise-tasks/lib/pi-discover.sh"
+
+PI_USER="${1:-ubuntu}"
+discover_pi_nodes "${PI_USER}" || exit 1
+
+echo
+echo "server=${PI_SERVER}  agents=${PI_AGENT_0} ${PI_AGENT_1} ${PI_AGENT_2}"
+
+if [[ -f "${NODES_ENV}" ]]; then
+  ULA_LINES="$(grep -E '_ULA=' "${NODES_ENV}" || true)"
+  TMP="$(mktemp)"
+  {
+    echo "# Pi-Cluster Node-Konfiguration – generiert von: mise run setup -- pi / pi-discover"
+    echo "PI_USER=\"${PI_USER}\""
+    echo "PI_SERVER=\"${PI_SERVER}\""
+    echo "PI_AGENT_0=\"${PI_AGENT_0}\""
+    echo "PI_AGENT_1=\"${PI_AGENT_1}\""
+    echo "PI_AGENT_2=\"${PI_AGENT_2}\""
+    [[ -n "${ULA_LINES}" ]] && echo "${ULA_LINES}"
+  } > "${TMP}"
+  mv "${TMP}" "${NODES_ENV}"
+  echo "nodes.env aktualisiert (IPs; vorhandene ULAs unangetastet)"
+else
+  echo "Hinweis: ${NODES_ENV} existiert noch nicht – IPs oben manuell in 'mise run setup -- pi' übernehmen oder danach erneut laufen lassen"
+fi

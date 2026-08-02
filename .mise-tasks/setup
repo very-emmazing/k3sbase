@@ -76,6 +76,8 @@ NODES_ENV_UPDATED=false
 if [[ "${CLUSTER}" == "pi" ]]; then
   step "Pi-Node-Konfiguration (clusters/pi/nodes.env)"
   NODES_ENV="${REPO_ROOT}/clusters/pi/nodes.env"
+  # shellcheck source=lib/pi-discover.sh
+  source "${REPO_ROOT}/.mise-tasks/lib/pi-discover.sh"
 
   _nodes_ok() {
     # shellcheck source=/dev/null
@@ -90,22 +92,34 @@ if [[ "${CLUSTER}" == "pi" ]]; then
     ok "Bereits konfiguriert: server=${PI_SERVER}  agents=${PI_AGENT_0} ${PI_AGENT_1} ${PI_AGENT_2}"
     ok "ULAs: server=${PI_SERVER_ULA}  agents=${PI_AGENT_0_ULA} ${PI_AGENT_1_ULA} ${PI_AGENT_2_ULA}"
   else
-    hint "Voraussetzung: Ubuntu auf allen Nodes, SSH-Pubkey bereits hinterlegt"
+    hint "Suche Nodes automatisch im lokalen Subnetz (Hostnamen pi-node-1..4, von 'mise run pi-flash' gesetzt) …"
+    if discover_pi_nodes "ubuntu"; then
+      PI_USER="ubuntu"
+      ok "Automatisch gefunden: server=${PI_SERVER}  agents=${PI_AGENT_0} ${PI_AGENT_1} ${PI_AGENT_2}"
+    else
+      warn "Automatische Suche fehlgeschlagen – manuell eingeben"
+      hint "Voraussetzung: Ubuntu auf allen Nodes, SSH-Pubkey bereits hinterlegt"
+      echo
+      read -r -p "  SSH-User    [ubuntu]: " INPUT_USER
+      PI_USER="${INPUT_USER:-ubuntu}"
+      read -r -p "  Server-IP    (1x): "   PI_SERVER
+      read -r -p "  Agent-IP 1   (1x): "   PI_AGENT_0
+      read -r -p "  Agent-IP 2   (2x): "   PI_AGENT_1
+      read -r -p "  Agent-IP 3   (3x): "   PI_AGENT_2
+      [[ -z "${PI_SERVER}" ]] && die "Server-IP darf nicht leer sein"
+      for v in PI_AGENT_0 PI_AGENT_1 PI_AGENT_2; do
+        [[ -z "${!v}" ]] && die "${v} darf nicht leer sein"
+      done
+    fi
+
     hint "IPv6-only-Cluster: pro Node zusätzlich die statische ULA (k3s --node-ip);"
     hint "die ULA muss bereits auf dem Node-Interface konfiguriert sein (siehe README)"
     echo
-    read -r -p "  SSH-User    [ubuntu]: " INPUT_USER
-    PI_USER="${INPUT_USER:-ubuntu}"
-    read -r -p "  Server-IP    (1x): "   PI_SERVER
-    read -r -p "  Agent-IP 1   (1x): "   PI_AGENT_0
-    read -r -p "  Agent-IP 2   (2x): "   PI_AGENT_1
-    read -r -p "  Agent-IP 3   (3x): "   PI_AGENT_2
     read -r -p "  Server-ULA   (1x): "   PI_SERVER_ULA
     read -r -p "  Agent-ULA 1  (1x): "   PI_AGENT_0_ULA
     read -r -p "  Agent-ULA 2  (2x): "   PI_AGENT_1_ULA
     read -r -p "  Agent-ULA 3  (3x): "   PI_AGENT_2_ULA
-    [[ -z "${PI_SERVER}" ]] && die "Server-IP darf nicht leer sein"
-    for v in PI_AGENT_0 PI_AGENT_1 PI_AGENT_2 PI_SERVER_ULA PI_AGENT_0_ULA PI_AGENT_1_ULA PI_AGENT_2_ULA; do
+    for v in PI_SERVER_ULA PI_AGENT_0_ULA PI_AGENT_1_ULA PI_AGENT_2_ULA; do
       [[ -z "${!v}" ]] && die "${v} darf nicht leer sein"
     done
     cat > "${NODES_ENV}" <<ENV
