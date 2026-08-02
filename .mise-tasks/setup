@@ -12,7 +12,7 @@ case "${CLUSTER}" in
   *) printf "Unbekannter Cluster '%s'. Erlaubt: local | pi\n" "${CLUSTER}" >&2; exit 1 ;;
 esac
 
-TOTAL=3; [[ "${CLUSTER}" == "pi" ]] && TOTAL=5
+TOTAL=3; [[ "${CLUSTER}" == "pi" ]] && TOTAL=6
 STEP=0
 
 if [[ -t 1 ]]; then
@@ -230,6 +230,52 @@ YAML
   CF_SECRETS_UPDATED+=("${CF_SECRET}")
 done
 
+# ── [pi] Cloudflare Tunnel Credentials ────────────────────────────────────────
+# "cloudflared tunnel login" + "tunnel create" sind Browser-OAuth – nicht
+# scriptbar, bleiben manuell. Ab der JSON-Datei übernimmt setup: einbetten,
+# verschlüsseln, zum Commit vormerken.
+CLOUDFLARED_CREDS_UPDATED=false
+if [[ "${CLUSTER}" == "pi" ]]; then
+  step "Cloudflare Tunnel Credentials"
+  CREDS_SECRET="clusters/pi/infrastructure/cloudflared-credentials-secret.yaml"
+
+  if grep -q 'ENC\[' "${REPO_ROOT}/${CREDS_SECRET}" 2>/dev/null; then
+    ok "Bereits SOPS-verschlüsselt – übersprungen: ${CREDS_SECRET}"
+  else
+    TUNNEL_ID="$(_get_setting TUNNEL_ID)"
+    if [[ -z "${TUNNEL_ID}" || "${TUNNEL_ID}" == REPLACE_WITH_* ]]; then
+      warn "TUNNEL_ID noch nicht gesetzt – Tunnel-Credentials übersprungen"
+      hint "Erst: cloudflared tunnel login && cloudflared tunnel create pi"
+      hint "Danach TUNNEL_ID oben setzen und 'mise run setup -- pi' erneut laufen lassen"
+    else
+      CREDS_FILE="${HOME}/.cloudflared/${TUNNEL_ID}.json"
+      if [[ ! -f "${CREDS_FILE}" ]]; then
+        warn "Tunnel-Credentials nicht gefunden: ${CREDS_FILE}"
+        hint "Erst: cloudflared tunnel login && cloudflared tunnel create pi"
+      else
+        TMP_SECRET="$(mktemp)"
+        trap 'rm -f "${TMP_SECRET}" "${TMP_SECRET}.enc"' EXIT
+        {
+          echo "apiVersion: v1"
+          echo "kind: Secret"
+          echo "metadata:"
+          echo "  name: cloudflared-credentials"
+          echo "  namespace: cloudflared"
+          echo "stringData:"
+          echo "  credentials.json: |"
+          sed 's/^/    /' "${CREDS_FILE}"
+        } > "${TMP_SECRET}"
+        SOPS_AGE_KEY_FILE="${AGE_KEY_FILE}" sops -e --filename-override "${CREDS_SECRET}" \
+          "${TMP_SECRET}" > "${TMP_SECRET}.enc"
+        mv "${TMP_SECRET}.enc" "${REPO_ROOT}/${CREDS_SECRET}"
+        rm -f "${TMP_SECRET}"
+        ok "Verschlüsselt: ${CREDS_SECRET}"
+        CLOUDFLARED_CREDS_UPDATED=true
+      fi
+    fi
+  fi
+fi
+
 # ── Commits ───────────────────────────────────────────────────────────────────
 _commit() {
   local msg="$1"; shift
@@ -243,6 +289,7 @@ HAS_CHANGES=false
 [[ "${NODES_ENV_UPDATED}" == true ]] && HAS_CHANGES=true
 [[ "${SETTINGS_UPDATED}" == true ]] && HAS_CHANGES=true
 [[ ${#CF_SECRETS_UPDATED[@]} -gt 0 ]] && HAS_CHANGES=true
+[[ "${CLOUDFLARED_CREDS_UPDATED}" == true ]] && HAS_CHANGES=true
 
 if [[ "${HAS_CHANGES}" == true ]]; then
   printf "\n"
@@ -252,12 +299,14 @@ if [[ "${HAS_CHANGES}" == true ]]; then
     [[ "${NODES_ENV_UPDATED}" == true ]] && _commit "chore(pi): set node ips in nodes.env"            clusters/pi/nodes.env
     [[ "${SETTINGS_UPDATED}" == true ]]  && _commit "chore(pi): set cluster settings"                 clusters/pi/cluster-settings.yaml
     [[ ${#CF_SECRETS_UPDATED[@]} -gt 0 ]] && _commit "feat(${CLUSTER}): add sops-encrypted cloudflare api token" "${CF_SECRETS_UPDATED[@]}"
+    [[ "${CLOUDFLARED_CREDS_UPDATED}" == true ]] && _commit "feat(cloudflared): add sops-encrypted tunnel credentials" "${CREDS_SECRET}"
   else
     printf "\n"; hint "Manuell committen:"
     [[ "${SOPS_YAML_UPDATED}" == true ]] && hint "  git add .sops.yaml && git commit -m 'chore(sops): set age recipient'"
     [[ "${NODES_ENV_UPDATED}" == true ]] && hint "  git add clusters/pi/nodes.env && git commit -m 'chore(pi): set node ips in nodes.env'"
     [[ "${SETTINGS_UPDATED}" == true ]]  && hint "  git add clusters/pi/cluster-settings.yaml && git commit -m 'chore(pi): set cluster settings'"
     [[ ${#CF_SECRETS_UPDATED[@]} -gt 0 ]] && hint "  git add ${CF_SECRETS_UPDATED[*]} && git commit -m 'feat(${CLUSTER}): add sops-encrypted cloudflare api token'"
+    [[ "${CLOUDFLARED_CREDS_UPDATED}" == true ]] && hint "  git add ${CREDS_SECRET} && git commit -m 'feat(cloudflared): add sops-encrypted tunnel credentials'"
   fi
 fi
 
