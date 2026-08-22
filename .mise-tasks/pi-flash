@@ -19,6 +19,12 @@ PI_USER="ubuntu"
 command -v tpi >/dev/null || { echo "Fehler: tpi nicht gefunden – zuerst: mise install"; exit 1; }
 [[ -f "${IMAGE}" ]] || { echo "Fehler: Image nicht gefunden: ${IMAGE}"; exit 1; }
 
+# tpi >=2.0 verlangt BMC-Auth (TPI_USERNAME/TPI_PASSWORD, von tpi selbst
+# gelesen). Ohne diese Env-Vars hängt der erste "tpi power off" am
+# interaktiven Passwort-Prompt – mitten in der Slot-Schleife, nicht wiederholbar.
+[[ -n "${TPI_USERNAME:-}" && -n "${TPI_PASSWORD:-}" ]] \
+  || { echo "Fehler: TPI_USERNAME/TPI_PASSWORD nicht gesetzt – zuerst exportieren (BMC-Zugangsdaten)"; exit 1; }
+
 PUBKEY="$(ssh_agent_pubkey)"
 
 echo "Nodes: BMC=${BMC_HOST}  User=${PI_USER}"

@@ -19,6 +19,11 @@ erreichbar, statische IPv6-ULA pro Node konfiguriert.
   Provisionieren automatisch aus dem Agent gezogen, kein Datei-Pfad nötig
 - `sudo` auf der Workstation (für `losetup`/`mount` beim Einbetten des
   Cloud-Init-user-data in Schritt 2)
+- BMC-Zugangsdaten als `TPI_USERNAME`/`TPI_PASSWORD` exportiert (`tpi` liest
+  diese Env-Vars automatisch; ohne sie hängt jeder `tpi`-Aufruf an einem
+  interaktiven Passwort-Prompt — bricht `pi-flash` mitten in der
+  Slot-Schleife ab). Default ab Werk: `root`/`turing` — vor Produktivbetrieb
+  ändern (BMC-Web-UI oder `tpi`).
 - Router mit IPv6-Präfix-Delegation (GUA-Egress) und DHCP für die
   Management-IPv4-Adressen der Nodes
 - Dieses Repo geklont, `mise install` bereits gelaufen (installiert u.a.
@@ -63,7 +68,8 @@ done
 IPs werden in Schritt 4 automatisch gefunden — manuelles Notieren nur als
 Fallback nötig (Router-DHCP-Leases oder `tpi --host <bmc-ip> info`).
 Boot-Probleme debuggen: serielle Konsole via
-`tpi --host <bmc-ip> uart -n <slot>`.
+`tpi --host <bmc-ip> uart -n <slot> get` (Pflichtargument `get`/`set` — ohne
+bricht der Befehl mit „missing required argument" ab).
 
 ## 4. ULAs + Domain/Tunnel im Repo hinterlegen
 
