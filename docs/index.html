@@ -1,0 +1,566 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>k3sbase — GitOps k3s/k3d Cluster</title>
+<meta name="description" content="GitOps-verwalteter k3s-/k3d-Cluster mit Flux Operator, Cilium, cert-manager und external-dns/Cloudflare.">
+<style>
+  :root {
+    --bg: #ffffff;
+    --bg-alt: #f5f6f8;
+    --fg: #1a1d21;
+    --fg-muted: #565d66;
+    --border: #e1e4e8;
+    --accent: #0b5fff;
+    --accent-fg: #ffffff;
+    --code-bg: #f0f2f5;
+    --radius: 8px;
+    --max-width: 68rem;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #14161a;
+      --bg-alt: #1b1e23;
+      --fg: #e6e8eb;
+      --fg-muted: #9aa2ad;
+      --border: #2a2e35;
+      --accent: #5b9cff;
+      --accent-fg: #0b1220;
+      --code-bg: #1e2127;
+    }
+  }
+
+  * { box-sizing: border-box; }
+
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--fg);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    line-height: 1.6;
+    font-size: 16px;
+  }
+
+  code, pre {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  }
+
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+
+  .wrap {
+    max-width: var(--max-width);
+    margin: 0 auto;
+    padding: 0 1.25rem;
+  }
+
+  header.hero {
+    border-bottom: 1px solid var(--border);
+    padding: clamp(2rem, 6vw, 4rem) 0 clamp(1.5rem, 4vw, 2.5rem);
+  }
+
+  header.hero h1 {
+    font-size: clamp(2rem, 5vw, 3rem);
+    margin: 0 0 0.5rem;
+    letter-spacing: -0.02em;
+  }
+
+  header.hero p.tagline {
+    font-size: clamp(1rem, 2vw, 1.2rem);
+    color: var(--fg-muted);
+    margin: 0 0 1.5rem;
+    max-width: 48rem;
+  }
+
+  nav.toc {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem 1.25rem;
+    font-size: 0.95rem;
+  }
+
+  nav.toc a {
+    color: var(--fg);
+    font-weight: 600;
+  }
+  nav.toc a:hover { color: var(--accent); }
+
+  main section {
+    padding: clamp(2rem, 5vw, 3.5rem) 0;
+    border-bottom: 1px solid var(--border);
+  }
+  main section:last-of-type { border-bottom: none; }
+
+  section h2 {
+    font-size: clamp(1.4rem, 3vw, 1.8rem);
+    margin: 0 0 1.25rem;
+    letter-spacing: -0.01em;
+  }
+
+  section h2 .eyebrow {
+    display: block;
+    font-size: 0.8rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 0.35rem;
+  }
+
+  p { margin: 0 0 1rem; }
+  ul, ol { margin: 0 0 1rem; padding-left: 1.3rem; }
+  li { margin-bottom: 0.4rem; }
+
+  pre {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 1rem 1.1rem;
+    overflow-x: auto;
+    font-size: 0.9rem;
+    margin: 0 0 1.25rem;
+  }
+
+  code.inline {
+    background: var(--code-bg);
+    border-radius: 4px;
+    padding: 0.1em 0.4em;
+    font-size: 0.9em;
+  }
+
+  .badge-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin: 0 0 1.5rem;
+  }
+
+  .badge {
+    display: inline-block;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 0.25rem 0.85rem;
+    font-size: 0.85rem;
+    color: var(--fg-muted);
+  }
+
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+    gap: 1.1rem;
+  }
+
+  .card {
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--bg-alt);
+    padding: 1.1rem 1.25rem;
+  }
+
+  .card h3 {
+    margin: 0 0 0.5rem;
+    font-size: 1.05rem;
+  }
+
+  .card p, .card ul { margin-bottom: 0; font-size: 0.95rem; color: var(--fg-muted); }
+
+  .step-list {
+    list-style: none;
+    padding: 0;
+    margin: 0 0 1.25rem;
+    counter-reset: step;
+  }
+
+  .step-list > li {
+    counter-increment: step;
+    position: relative;
+    padding-left: 2.6rem;
+    margin-bottom: 1rem;
+  }
+
+  .step-list > li::before {
+    content: counter(step);
+    position: absolute;
+    left: 0;
+    top: 0.1rem;
+    width: 1.8rem;
+    height: 1.8rem;
+    border-radius: 50%;
+    background: var(--accent);
+    color: var(--accent-fg);
+    font-size: 0.85rem;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .note {
+    border-left: 3px solid var(--accent);
+    background: var(--bg-alt);
+    padding: 0.85rem 1rem;
+    border-radius: 0 var(--radius) var(--radius) 0;
+    font-size: 0.92rem;
+    margin: 0 0 1.25rem;
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.92rem;
+    margin: 0 0 1.25rem;
+  }
+  th, td {
+    text-align: left;
+    padding: 0.5rem 0.75rem;
+    border-bottom: 1px solid var(--border);
+    vertical-align: top;
+  }
+  th { color: var(--fg-muted); font-weight: 600; }
+
+  .ref-columns {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+    gap: 2rem;
+  }
+
+  .ref-columns h3 {
+    font-size: 1rem;
+    color: var(--fg-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin: 0 0 0.75rem;
+  }
+
+  .ref-columns ul { list-style: none; padding: 0; }
+  .ref-columns li { margin-bottom: 0.5rem; }
+  .ref-columns li small {
+    display: block;
+    color: var(--fg-muted);
+    font-size: 0.82rem;
+  }
+
+  footer {
+    padding: 1.5rem 0 3rem;
+    color: var(--fg-muted);
+    font-size: 0.85rem;
+  }
+
+  @media (max-width: 30rem) {
+    nav.toc { gap: 0.4rem 0.9rem; font-size: 0.88rem; }
+  }
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <div class="wrap">
+    <h1>k3sbase</h1>
+    <p class="tagline">
+      GitOps-verwalteter k3s-/k3d-Cluster mit Flux Operator, Cilium, cert-manager
+      und external-dns/Cloudflare. Ein Repo, zwei Cluster-Ziele — lokaler k3d-Dev-Cluster
+      und ein physischer Turing&nbsp;Pi&nbsp;2-Cluster (IPv6-only, Split-Horizon-Zugriff).
+    </p>
+    <div class="badge-row">
+      <span class="badge">Flux Operator</span>
+      <span class="badge">Cilium / Gateway API</span>
+      <span class="badge">cert-manager</span>
+      <span class="badge">external-dns</span>
+      <span class="badge">SOPS + age</span>
+      <span class="badge">mise</span>
+    </div>
+    <nav class="toc" aria-label="Sprungmarken">
+      <a href="#ueberblick">Worum es geht</a>
+      <a href="#getting-started">Getting Started</a>
+      <a href="#features">Features</a>
+      <a href="#designentscheidungen">Designentscheidungen</a>
+      <a href="#referenz">Referenz</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+
+  <section id="ueberblick">
+    <div class="wrap">
+      <h2><span class="eyebrow">Überblick</span>Worum es geht</h2>
+      <p>
+        <strong>k3sbase</strong> ist ein Baukasten für GitOps-verwaltete Kubernetes-Cluster:
+        ein Repo, zwei Cluster-Ziele, dieselben Infrastruktur-Manifeste. Nach dem einmaligen
+        Bootstrap übernimmt Flux vollständig — jede weitere Änderung läuft über Commit und
+        Push, kein manuelles <code class="inline">kubectl apply</code> oder
+        <code class="inline">helm install</code> mehr.
+      </p>
+      <ul>
+        <li>
+          <strong>local</strong> — ein k3d-Cluster für schnelle Entwicklung, in Minuten aus
+          einem frischen Checkout aufgebaut.
+        </li>
+        <li>
+          <strong>pi</strong> — ein physischer Turing&nbsp;Pi&nbsp;2-Cluster
+          (1&nbsp;Server&nbsp;+&nbsp;3&nbsp;Agents) auf k3s, IPv6-only, mit Cilium Gateway API
+          und Split-Horizon-Zugriff (extern via Cloudflare&nbsp;Tunnel, intern via statischer
+          IPv6-ULA).
+        </li>
+      </ul>
+      <p>
+        Weitere Cluster-Targets sind als eigene Verzeichnisse unter <code class="inline">clusters/</code>
+        vorgesehen; die <code class="inline">infrastructure/</code>-Manifeste in
+        <code class="inline">clusters/base/</code> sind bewusst target-übergreifend wiederverwendbar,
+        target-spezifische Abweichungen bleiben in der Bootstrap-/Cluster-Schicht.
+      </p>
+    </div>
+  </section>
+
+  <section id="getting-started">
+    <div class="wrap">
+      <h2><span class="eyebrow">Loslegen</span>Getting Started</h2>
+      <p>Der schnellste Weg zu einem laufenden Cluster ist der lokale k3d-Cluster:</p>
+
+      <ol class="step-list">
+        <li>
+          <strong>Tools installieren</strong>
+          <pre>mise install   # kubectl, helm, flux2, age, sops, k3d, cilium-cli</pre>
+        </li>
+        <li>
+          <strong>Secrets &amp; Konfiguration einmalig einrichten</strong>
+          <pre>mise run setup -- local</pre>
+          Fragt Cloudflare-API-Token ab, generiert den age-Key und verschlüsselt alles per SOPS.
+        </li>
+        <li>
+          <strong>Cluster erstellen, Cilium installieren, Flux bootstrappen</strong>
+          <pre>mise run cluster-up    -- local
+mise run cilium-up     -- local
+mise run flux-bootstrap -- local</pre>
+        </li>
+      </ol>
+
+      <div class="note">
+        Wenn <code class="inline">cluster-up</code> die Server-IP in
+        <code class="inline">clusters/local/infrastructure/cilium.yaml</code> patcht: vor
+        <code class="inline">flux-bootstrap</code> committen und pushen — Flux reconciliert
+        <code class="inline">origin/main</code>, nicht den lokalen Checkout.
+      </div>
+
+      <p>
+        Für den physischen Pi-Cluster (Turing&nbsp;Pi&nbsp;2, ab einem BMC ohne OS) gibt es einen
+        eigenen, ausführlichen Weg vom Flashen der Compute-Module bis zur Übergabe an dieselbe
+        Bootstrap-Kette — siehe
+        <a href="https://github.com/very-emmazing/k3sbase/blob/main/docs/how-to/turing-pi-2-fresh-setup.md">Turing-Pi-2-Fresh-Setup-How-To</a>
+        und das vollständige <a href="https://github.com/very-emmazing/k3sbase#readme">README</a>.
+      </p>
+    </div>
+  </section>
+
+  <section id="features">
+    <div class="wrap">
+      <h2><span class="eyebrow">Was drin ist</span>Features</h2>
+      <div class="grid">
+
+        <div class="card">
+          <h3>Networking (Cilium)</h3>
+          <p>
+            kube-proxy-Replacement, Gateway API (Cilium-Controller + Envoy) statt
+            Ingress-Controller. <code class="inline">local</code>: Overlay-Routing.
+            <code class="inline">pi</code>: IPv6-only Native Routing, HA-Operator.
+          </p>
+        </div>
+
+        <div class="card">
+          <h3>Split-Horizon-Zugriff <small>(nur pi)</small></h3>
+          <p>
+            Jeder Hostname über zwei Pfade erreichbar: extern via Cloudflare&nbsp;Tunnel,
+            intern via statischer IPv6-ULA (Cilium LB-IPAM-Pinning, kein
+            L2-Announcement nötig) — große Uploads müssen nicht durch den Tunnel.
+          </p>
+        </div>
+
+        <div class="card">
+          <h3>TLS &amp; DNS</h3>
+          <p>
+            cert-manager + Let's-Encrypt-<code class="inline">ClusterIssuer</code> via
+            DNS-01/Cloudflare (Wildcard-Zertifikate). external-dns legt DNS-Einträge
+            inkl. Tunnel-CNAME automatisch an.
+          </p>
+        </div>
+
+        <div class="card">
+          <h3>Secrets</h3>
+          <p>
+            SOPS + age — nur <code class="inline">data</code>/<code class="inline">stringData</code>
+            verschlüsselt, <code class="inline">kind</code>/<code class="inline">apiVersion</code>
+            bleiben für <code class="inline">kustomize build</code> lesbar.
+          </p>
+        </div>
+
+        <div class="card">
+          <h3>GitOps (Flux Operator)</h3>
+          <p>
+            FluxInstance statt manuellem <code class="inline">flux bootstrap</code>.
+            Kustomization-Kette mit <code class="inline">dependsOn</code>/<code class="inline">healthChecks</code>,
+            zentrale ConfigMaps als einzige Quelle der Wahrheit für Flux <em>und</em> mise-Tasks.
+          </p>
+        </div>
+
+        <div class="card">
+          <h3>BMC-/Hardware-Bootstrap <small>(Turing Pi 2)</small></h3>
+          <p>
+            <code class="inline">tpi</code>-CLI flasht alle vier Compute-Module inkl. Cloud-Init,
+            automatische Node-Discovery per Hostname-Scan, Ansible konvergiert SSH-Härtung
+            und statische ULAs idempotent.
+          </p>
+        </div>
+
+        <div class="card">
+          <h3>Interaktiver Setup-Assistent</h3>
+          <p>
+            Ein Befehl (<code class="inline">mise run setup</code>) für age-Key,
+            SOPS-Recipient, Node-Konfiguration und alle Secrets — mehrfach ausführbar,
+            fragt nur fehlende Werte ab.
+          </p>
+        </div>
+
+        <div class="card">
+          <h3>Lokale Validierung <small>(flux-local)</small></h3>
+          <p>
+            Kustomizations/HelmReleases gegen den Git-Stand geprüft, ganz ohne laufenden
+            Cluster — als Pre-Push-Gate über <code class="inline">pre-commit</code> einbindbar.
+          </p>
+        </div>
+
+        <div class="card">
+          <h3>Beispiel-Workload &amp; Testplan</h3>
+          <p>
+            <code class="inline">echo-a</code>/<code class="inline">echo-b</code> testen die
+            komplette Kette: Gateway, HTTPRoute-Matching, Zertifikat, beide Zugriffspfade.
+          </p>
+        </div>
+
+        <div class="card">
+          <h3>Versionierung</h3>
+          <p>
+            Alle Chart-/Tool-Versionen gepinnt, keine <code class="inline">latest</code>-Floating-Tags —
+            zentral je Cluster in <code class="inline">cluster-versions.yaml</code>.
+          </p>
+        </div>
+
+      </div>
+    </div>
+  </section>
+
+  <section id="designentscheidungen">
+    <div class="wrap">
+      <h2><span class="eyebrow">Warum so</span>Designentscheidungen</h2>
+
+      <table>
+        <thead>
+          <tr><th>Entscheidung</th><th>Begründung</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Alles im Repo, nichts nur in Shell</td>
+            <td>Jeder Schritt ist ein idempotentes Skript oder Manifest, aufrufbar via mise-Task. Frischer Checkout + mise-Tasks in Reihenfolge muss denselben Cluster ergeben.</td>
+          </tr>
+          <tr>
+            <td>GitOps zuerst</td>
+            <td>Nach dem Flux-Bootstrap kein manuelles <code class="inline">helm install</code>/<code class="inline">kubectl apply</code> mehr. Einzige Ausnahmen: zwangsläufig imperative Bootstrap-Schritte (CNI vor Flux, Flux selbst), klar kommentiert.</td>
+          </tr>
+          <tr>
+            <td>Minimaler Overhead</td>
+            <td>Keine Komponente ohne konkretes Problem.</td>
+          </tr>
+          <tr>
+            <td>IPv6-only auf dem Pi-Cluster</td>
+            <td>Bewusste Vereinfachung statt Dual-Stack. Native Routing statt VXLAN, weil Ciliums Tunnel-Modus in 1.16 einen IPv4-Underlay voraussetzen würde.</td>
+          </tr>
+          <tr>
+            <td>Split-Horizon statt nur Tunnel</td>
+            <td>Große Uploads (z.B. Nextcloud) sollen nicht über den Cloudflare-Tunnel-Umweg laufen müssen — LAN-Traffic geht direkt über die statische Gateway-ULA.</td>
+          </tr>
+          <tr>
+            <td>LB-IPAM-Pinning statt L2-Announcement</td>
+            <td>Cilium ignoriert <code class="inline">Gateway.spec.addresses</code>; die statische Adresse kommt über einen LB-IPAM-Pool + Pinning-Annotation und verhält sich im Datapath identisch zu <code class="inline">externalIPs</code>.</td>
+          </tr>
+          <tr>
+            <td>SOPS verschlüsselt nur <code class="inline">data</code>/<code class="inline">stringData</code></td>
+            <td><code class="inline">kind</code>/<code class="inline">apiVersion</code>/<code class="inline">metadata</code> bleiben lesbar — sonst schlägt jeder <code class="inline">kustomize build</code> fehl.</td>
+          </tr>
+          <tr>
+            <td>Helm-Release-Adoption statt Doppel-Install</td>
+            <td>Cilium wird vor Flux imperativ installiert (Henne-Ei-Problem), Flux übernimmt danach dieselbe Release über gleichen Namen/Namespace statt einen zweiten Install zu versuchen.</td>
+          </tr>
+          <tr>
+            <td><code class="inline">ClusterIssuer</code>/<code class="inline">Gateway</code> in <code class="inline">apps/</code>, nicht <code class="inline">infrastructure/</code></td>
+            <td>Der kustomize-controller kann CRs unbekannter Kinds nicht applien, bevor deren CRDs (aus den Helm-Releases) existieren. <code class="inline">dependsOn</code> + <code class="inline">healthChecks</code> entkoppeln das sauber.</td>
+          </tr>
+          <tr>
+            <td>Alle Versionen gepinnt</td>
+            <td>Keine <code class="inline">latest</code>-Floating-Tags. Eine zentrale ConfigMap pro Cluster ist Quelle für Flux (<code class="inline">postBuild.substituteFrom</code>) und mise-Tasks gleichermaßen.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section id="referenz">
+    <div class="wrap">
+      <h2><span class="eyebrow">Weiterlesen</span>Referenz</h2>
+
+      <div class="ref-columns">
+        <div>
+          <h3>Im Repo</h3>
+          <ul>
+            <li>
+              <a href="https://github.com/very-emmazing/k3sbase#readme">README</a>
+              <small>Vollständige Bootstrap-Reihenfolge, Secrets, Cluster-Targets</small>
+            </li>
+            <li>
+              <a href="https://github.com/very-emmazing/k3sbase/blob/main/docs/how-to/turing-pi-2-fresh-setup.md">Turing-Pi-2-Fresh-Setup-How-To</a>
+              <small>Vom BMC ohne OS bis zur Übergabe an die Bootstrap-Kette</small>
+            </li>
+            <li>
+              <a href="https://github.com/very-emmazing/k3sbase/blob/main/TESTPLAN.md">TESTPLAN.md</a>
+              <small>End-to-End-Tests für Split-Horizon-Routing</small>
+            </li>
+            <li>
+              <a href="https://github.com/very-emmazing/k3sbase/blob/main/CLAUDE.md">CLAUDE.md</a>
+              <small>Grundprinzipien, Commit-Konvention, Repo-Struktur</small>
+            </li>
+          </ul>
+        </div>
+
+        <div>
+          <h3>Tools &amp; Dokumentation</h3>
+          <ul>
+            <li><a href="https://fluxcd.io">Flux</a> <small>GitOps-Toolkit, hier via Flux Operator</small></li>
+            <li><a href="https://cilium.io">Cilium</a> <small>CNI, kube-proxy-Replacement, Gateway API</small></li>
+            <li><a href="https://gateway-api.sigs.k8s.io">Gateway API</a> <small>Ingress-Nachfolger, standard-channel CRDs</small></li>
+            <li><a href="https://cert-manager.io">cert-manager</a> <small>Zertifikate via Let's Encrypt/DNS-01</small></li>
+            <li><a href="https://kubernetes-sigs.github.io/external-dns/">external-dns</a> <small>DNS-Records aus Cluster-Ressourcen</small></li>
+            <li><a href="https://github.com/getsops/sops">SOPS</a> + <a href="https://github.com/FiloSottile/age">age</a> <small>Secrets-Verschlüsselung im Repo</small></li>
+            <li><a href="https://k3d.io">k3d</a> / <a href="https://k3s.io">k3s</a> <small>lokaler Dev-Cluster / Pi-Cluster</small></li>
+            <li><a href="https://github.com/turing-machines/tpi">tpi</a> <small>BMC-CLI für den Turing Pi 2</small></li>
+            <li><a href="https://mise.jdx.dev">mise</a> <small>Tool- und Task-Runner für alle Bootstrap-Schritte</small></li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<footer>
+  <div class="wrap">
+    k3sbase — GitOps-verwalteter k3s-/k3d-Cluster.
+    <a href="https://github.com/very-emmazing/k3sbase">Quellcode auf GitHub</a>.
+  </div>
+</footer>
+
+</body>
+</html>
