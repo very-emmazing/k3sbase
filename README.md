@@ -5,6 +5,55 @@ Der Pi-Cluster läuft IPv6-only mit Cilium Gateway API und Split-Horizon-Zugriff
 (extern via Cloudflare Tunnel, intern via statischer IPv6-ULA) – siehe
 [Pi-Cluster: IPv6-only, Gateway & Split-Horizon](#pi-cluster-ipv6-only-gateway--split-horizon).
 
+## Features
+
+**Networking (Cilium)**
+kube-proxy-Replacement, Gateway API (Cilium-Controller + Envoy) statt Ingress-Controller.
+`local`: Overlay-Routing. `pi`: IPv6-only Native Routing (kein VXLAN), HA-Operator (2 Replicas).
+
+**Split-Horizon-Zugriff (nur `pi`)**
+Jeder Hostname über zwei Pfade erreichbar, ohne Umweg großer Uploads über den Tunnel:
+extern via Cloudflare Tunnel, intern via statischer IPv6-ULA (Cilium LB-IPAM-Pinning, kein
+L2-Announcement nötig) – siehe [unten](#pi-cluster-ipv6-only-gateway--split-horizon).
+
+**TLS & DNS**
+cert-manager + Let's-Encrypt-`ClusterIssuer` via DNS-01/Cloudflare (Wildcard-Zertifikate,
+kein öffentlicher HTTP-01-Pfad nötig); external-dns legt DNS-Einträge (inkl. Tunnel-CNAME)
+automatisch an.
+
+**Secrets**
+SOPS + age – nur `data`/`stringData` verschlüsselt, `kind`/`apiVersion`/`metadata` bleiben für
+`kustomize build` lesbar. Private Key verlässt nie die Maschine.
+
+**GitOps (Flux Operator)**
+FluxInstance statt manuellem `flux bootstrap`. Kustomization-Kette mit `dependsOn`/`healthChecks`
+(`gateway-api-crds` → `infrastructure` → `apps`), `postBuild.substituteFrom` aus zentralen
+ConfigMaps (Versionen, bei `pi` zusätzlich Domain/CIDRs/Gateway-ULA) als einzige Quelle der
+Wahrheit für Flux **und** die mise-Tasks.
+
+**BMC-/Hardware-Bootstrap (Turing Pi 2, `pi`)**
+`tpi`-CLI automatisiert Flashen aller vier Compute-Module inkl. Cloud-Init (Pubkey aus
+ssh-agent, kein UART-Erstzugang nötig), automatische Node-Discovery per Hostname-Scan, Ansible
+konvergiert SSH-Härtung + statische ULAs idempotent – siehe
+[Turing-Pi-2-How-To](docs/how-to/turing-pi-2-fresh-setup.md).
+
+**Interaktiver Setup-Assistent**
+Ein Befehl (`mise run setup`) für age-Key, SOPS-Recipient, Node-Konfiguration, Cluster-Settings
+und alle Secrets (verschlüsselt, mit Commit-Angebot) – mehrfach ausführbar, fragt nur fehlende
+Werte ab.
+
+**Lokale Validierung (flux-local)**
+Kustomizations/HelmReleases gegen den Git-Stand geprüft, ganz ohne laufenden Cluster – als
+Pre-Push-Gate über `pre-commit` einbindbar.
+
+**Beispiel-Workload & Testplan (`pi`)**
+`echo-a`/`echo-b` testen die komplette Kette (Gateway, HTTPRoute-Matching, Zertifikat, beide
+Zugriffspfade) – siehe [TESTPLAN.md](TESTPLAN.md).
+
+**Versionierung**
+Alle Chart-/Tool-Versionen gepinnt (keine `latest`-Floating-Tags), zentral je Cluster in
+`cluster-versions.yaml`.
+
 ## Voraussetzungen
 
 ```
