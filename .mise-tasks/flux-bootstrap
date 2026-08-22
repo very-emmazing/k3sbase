@@ -30,9 +30,14 @@ fi
 # ── Manifeste müssen gesetzt UND auf origin/main sein ─────────────────────────
 # Flux reconciliert origin/main, nicht den lokalen Checkout: ein nur lokal
 # committeter (oder gar uncommitteter) Wert käme im Cluster nie an.
+#
+# cilium.yaml hart blocken: ein Platzhalter dort bricht den ganzen Cluster
+# (k8sServiceHost). cluster-settings.yaml dagegen nur warnen: die einzelnen
+# Keys wirken isoliert (z.B. TUNNEL_ID nur auf cloudflared) – "setup -- pi"
+# erlaubt bewusst, TUNNEL_ID vorerst leer zu lassen ("später nachtragen"),
+# ein Hard-Block hier würde dann auch Cilium/cert-manager/external-dns vom
+# Bootstrap ausschließen, obwohl die von TUNNEL_ID unabhängig sind.
 CHECK_FILES=("clusters/${CLUSTER}/infrastructure/cilium.yaml")
-[[ "${CLUSTER}" == "pi" ]] && CHECK_FILES+=("clusters/pi/cluster-settings.yaml")
-
 for rel in "${CHECK_FILES[@]}"; do
   if grep -q 'REPLACE_WITH_' "${REPO_ROOT}/${rel}"; then
     echo "Fehler: Platzhalter (REPLACE_WITH_*) in ${rel} noch nicht gesetzt."
@@ -41,6 +46,19 @@ for rel in "${CHECK_FILES[@]}"; do
     exit 1
   fi
 done
+
+if [[ "${CLUSTER}" == "pi" ]]; then
+  SETTINGS_YAML="clusters/pi/cluster-settings.yaml"
+  CHECK_FILES+=("${SETTINGS_YAML}")
+  PLACEHOLDER_KEYS="$(grep -oE '^  [A-Z_]+: "REPLACE_WITH_[A-Z_]+"' "${REPO_ROOT}/${SETTINGS_YAML}" | awk '{print $1}' | tr -d ':' || true)"
+  if [[ -n "${PLACEHOLDER_KEYS}" ]]; then
+    echo "Warnung: Platzhalter in ${SETTINGS_YAML} noch nicht gesetzt: $(echo "${PLACEHOLDER_KEYS}" | tr '\n' ' ')"
+    echo "  Betroffene Ressourcen bleiben nicht funktionsfähig (z.B. cloudflared"
+    echo "  CrashLoop ohne TUNNEL_ID, ungültiges Zertifikat ohne PI_DOMAIN/ACME_EMAIL)."
+    echo "  Rest von infrastructure/apps wird trotzdem reconciled. Vervollständigen: mise run setup -- pi"
+  fi
+fi
+
 if git -C "${REPO_ROOT}" rev-parse --verify -q origin/main >/dev/null; then
   git -C "${REPO_ROOT}" fetch -q origin main 2>/dev/null \
     || echo "Warnung: git fetch fehlgeschlagen – prüfe gegen letzten bekannten Stand von origin/main"
