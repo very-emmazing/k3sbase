@@ -21,11 +21,23 @@ discover_pi_nodes() {
 
   if [[ -z "${prefix}" ]]; then
     local dev local_ip
-    dev="$(ip -4 route show default | awk '{print $5; exit}')"
-    local_ip="$(ip -4 -o addr show dev "${dev}" scope global | awk '{print $4; exit}' | cut -d/ -f1)"
+    # "ip" (iproute2) ist Linux-only – auf macOS (Workstation für den
+    # Turing-Pi-Bootstrap) gibt es das nicht, dort route(8)+ipconfig(8).
+    if command -v ip &>/dev/null; then
+      dev="$(ip -4 route show default | awk '{print $5; exit}')"
+      local_ip="$(ip -4 -o addr show dev "${dev}" scope global | awk '{print $4; exit}' | cut -d/ -f1)"
+    elif command -v route &>/dev/null && command -v ipconfig &>/dev/null; then
+      dev="$(route -n get default 2>/dev/null | awk '/interface: /{print $2}')"
+      local_ip="$(ipconfig getifaddr "${dev}" 2>/dev/null)"
+    fi
     [[ -z "${local_ip}" ]] && { echo "Fehler: lokales Subnetz nicht ermittelbar – PI_SUBNET_PREFIX=<a.b.c> setzen" >&2; return 1; }
     prefix="${local_ip%.*}"
   fi
+
+  # "timeout" (coreutils) gibt es auf macOS nicht ab Werk; "nc -z -w" deckt
+  # denselben Zweck (Connect-Timeout, kein Datenaustausch) ab und ist sowohl
+  # auf macOS als auch auf Linux per Default vorhanden (OpenBSD-netcat).
+  command -v nc >/dev/null || { echo "Fehler: nc (netcat) nicht gefunden – für die Node-Discovery nötig" >&2; return 1; }
 
   echo "Scanne ${prefix}.0/24 nach Pi-Nodes (Port 22) …" >&2
 
@@ -33,13 +45,16 @@ discover_pi_nodes() {
   local i host
   for i in $(seq 1 254); do
     host="${prefix}.${i}"
-    ( timeout 1 bash -c "echo >/dev/tcp/${host}/22" 2>/dev/null && : > "${tmpdir}/${host}" ) &
+    ( nc -z -w1 "${host}" 22 2>/dev/null && : > "${tmpdir}/${host}" ) &
     if (( i % 32 == 0 )); then wait; fi
   done
   wait
 
-  local open=()
-  mapfile -t open < <(ls "${tmpdir}" 2>/dev/null)
+  # kein mapfile: macOS liefert nur bash 3.2 aus (kein mapfile/readarray).
+  local open=() line
+  while IFS= read -r line; do
+    open+=("${line}")
+  done < <(ls "${tmpdir}" 2>/dev/null)
   rm -rf "${tmpdir}"
 
   if [[ "${#open[@]}" -eq 0 ]]; then
@@ -47,7 +62,10 @@ discover_pi_nodes() {
     return 1
   fi
 
-  local -A found
+  # Indexed statt Associative Array: "-A" braucht bash 4 (macOS liefert nur
+  # 3.2 aus), Slots sind ohnehin nur die Zahlen 1-4 – ein Indexed Array
+  # (bash 3.2-kompatibel) reicht dafür.
+  local -a found
   local ip hn
   for ip in "${open[@]}"; do
     hn="$(ssh -o BatchMode=yes -o ConnectTimeout=3 -o StrictHostKeyChecking=accept-new \

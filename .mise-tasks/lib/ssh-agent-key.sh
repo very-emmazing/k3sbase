@@ -4,8 +4,12 @@
 # Gibt den ersten Public Key aus dem laufenden ssh-agent auf stdout aus.
 # Bei mehreren geladenen Keys: Warnung auf stderr, erster Key gewinnt.
 ssh_agent_pubkey() {
-  local keys
-  mapfile -t keys < <(ssh-add -L 2>/dev/null || true)
+  # kein mapfile: macOS liefert nur bash 3.2 aus (kein mapfile/readarray, das
+  # kam erst mit bash 4.0), die while-read-Schleife ist überall portabel.
+  local keys=() line
+  while IFS= read -r line; do
+    keys+=("${line}")
+  done < <(ssh-add -L 2>/dev/null || true)
   if [[ "${#keys[@]}" -eq 0 || "${keys[0]}" == "The agent has no identities."* ]]; then
     echo "Fehler: kein Key im ssh-agent geladen – zuerst: ssh-add <keyfile>" >&2
     return 1
