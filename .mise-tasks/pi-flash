@@ -30,25 +30,44 @@ PUBKEY="$(ssh_agent_pubkey)"
 echo "Nodes: BMC=${BMC_HOST}  User=${PI_USER}"
 echo
 
+# macOS hat weder losetup (Loop-Devices sind Linux-spezifisch) noch GNU-cp
+# (--reflink). hdiutil (macOS-Bordmittel) haengt rohe Images direkt ein und
+# mountet FAT-Partitionen automatisch unter /Volumes, kein sudo noetig.
+IS_MACOS=false
+[[ "$(uname)" == "Darwin" ]] && IS_MACOS=true
+
 # Annahme: Ubuntu-"preinstalled-server"-Image – Partition 1 ("system-boot",
 # FAT) trägt cloud-init im NoCloud-Format (user-data-Datei im Root der
 # Partition). Anderes Image-Layout: Partitionsnummer unten anpassen.
 for slot in 1 2 3 4; do
   echo "=== Slot ${slot} ==="
 
-  WORK_IMG="$(mktemp --suffix=.img)"
+  # Kein --suffix (GNU-only, BSD-mktemp auf macOS kennt das nicht) – Suffix
+  # per Template, das ist auf beiden portabel.
+  WORK_IMG="$(mktemp "${TMPDIR:-/tmp}/pi-flash.XXXXXX.img")"
   USERDATA="$(mktemp)"
   MNT="$(mktemp -d)"
   LOOPDEV=""
+  HDIUTIL_DEV=""
   cleanup() {
-    [[ -n "${LOOPDEV}" ]] && sudo losetup -d "${LOOPDEV}" &>/dev/null || true
-    sudo umount "${MNT}" &>/dev/null || true
+    if [[ "${IS_MACOS}" == true ]]; then
+      [[ -n "${HDIUTIL_DEV}" ]] && hdiutil detach "${HDIUTIL_DEV}" &>/dev/null || true
+    else
+      [[ -n "${LOOPDEV}" ]] && sudo losetup -d "${LOOPDEV}" &>/dev/null || true
+      sudo umount "${MNT}" &>/dev/null || true
+    fi
     rmdir "${MNT}" &>/dev/null || true
     rm -f "${WORK_IMG}" "${USERDATA}"
   }
   trap cleanup EXIT
 
-  cp --reflink=auto "${IMAGE}" "${WORK_IMG}"
+  if [[ "${IS_MACOS}" == true ]]; then
+    # -c (APFS-Clonefile) statt --reflink=auto; faellt auf Volumes ohne
+    # Clonefile-Support (z.B. exFAT) still auf normales Kopieren zurück.
+    cp -c "${IMAGE}" "${WORK_IMG}" 2>/dev/null || cp "${IMAGE}" "${WORK_IMG}"
+  else
+    cp --reflink=auto "${IMAGE}" "${WORK_IMG}"
+  fi
 
   cat > "${USERDATA}" <<CLOUDINIT
 #cloud-config
@@ -64,12 +83,22 @@ users:
 ssh_pwauth: false
 CLOUDINIT
 
-  LOOPDEV="$(sudo losetup --show -fP "${WORK_IMG}")"
-  sudo mount "${LOOPDEV}p1" "${MNT}"
-  sudo cp "${USERDATA}" "${MNT}/user-data"
-  sudo umount "${MNT}"
-  sudo losetup -d "${LOOPDEV}"
-  LOOPDEV=""
+  if [[ "${IS_MACOS}" == true ]]; then
+    ATTACH_OUT="$(hdiutil attach "${WORK_IMG}")"
+    HDIUTIL_DEV="$(awk 'NR==1{print $1}' <<<"${ATTACH_OUT}")"
+    BOOT_MOUNT="$(awk '/\/Volumes\// {print $NF; exit}' <<<"${ATTACH_OUT}")"
+    [[ -n "${BOOT_MOUNT}" ]] || { echo "Fehler: Boot-Partition wurde von hdiutil nicht automatisch gemountet. hdiutil-Ausgabe:"; echo "${ATTACH_OUT}"; exit 1; }
+    cp "${USERDATA}" "${BOOT_MOUNT}/user-data"
+    hdiutil detach "${HDIUTIL_DEV}" >/dev/null
+    HDIUTIL_DEV=""
+  else
+    LOOPDEV="$(sudo losetup --show -fP "${WORK_IMG}")"
+    sudo mount "${LOOPDEV}p1" "${MNT}"
+    sudo cp "${USERDATA}" "${MNT}/user-data"
+    sudo umount "${MNT}"
+    sudo losetup -d "${LOOPDEV}"
+    LOOPDEV=""
+  fi
 
   echo "  flashe …"
   tpi --host "${BMC_HOST}" power off -n "${slot}"

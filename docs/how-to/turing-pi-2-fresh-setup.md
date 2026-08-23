@@ -17,8 +17,12 @@ erreichbar, statische IPv6-ULA pro Node konfiguriert.
   NoCloud-Format auf der Boot-Partition) passend zum Modultyp heruntergeladen
 - ssh-agent läuft, Ziel-Key geladen (`ssh-add -l`) — wird beim Flashen und
   Provisionieren automatisch aus dem Agent gezogen, kein Datei-Pfad nötig
-- `sudo` auf der Workstation (für `losetup`/`mount` beim Einbetten des
-  Cloud-Init-user-data in Schritt 2)
+- Workstation ist Linux oder macOS. Linux: `sudo` nötig (`losetup`/`mount`
+  beim Einbetten des Cloud-Init-user-data in Schritt 2). macOS: kein `sudo`
+  nötig, `pi-flash` nutzt dort `hdiutil` statt Loop-Devices (Bordmittel,
+  keine zusätzliche Installation) — bislang nur auf einer Maschine getestet,
+  bei Problemen bitte die `hdiutil attach`-Ausgabe aus der Fehlermeldung
+  melden.
 - BMC-Zugangsdaten als `TPI_USERNAME`/`TPI_PASSWORD` exportiert (`tpi` liest
   diese Env-Vars automatisch; ohne sie hängt jeder `tpi`-Aufruf an einem
   interaktiven Passwort-Prompt — bricht `pi-flash` mitten in der
